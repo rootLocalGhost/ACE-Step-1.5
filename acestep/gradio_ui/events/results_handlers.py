@@ -5,11 +5,7 @@ Contains event handlers and helper functions related to result display, scoring,
 import os
 import json
 import datetime
-import math
 import re
-import tempfile
-import shutil
-import zipfile
 import time as time_module
 import sys
 from typing import Dict, Any, Optional, List
@@ -25,7 +21,7 @@ from acestep.gpu_config import (
     check_batch_size_limit,
 )
 
-# Platform detection for Windows-specific fixes
+# Platform detection for Windows-specific fixess
 IS_WINDOWS = sys.platform == "win32"
 
 # Global results directory inside project root
@@ -1290,8 +1286,7 @@ def generate_lrc_handler(dit_handler, sample_idx, current_batch_index, batch_que
         Tuple of (lrc_display_update, details_accordion_update, batch_queue)
         Note: No audio_update - subtitles updated via lrc_display.change()
     """
-    import torch
-    
+
     if current_batch_index not in batch_queue:
         return gr.skip(), gr.skip(), batch_queue
 

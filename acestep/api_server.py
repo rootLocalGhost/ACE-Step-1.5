@@ -1840,7 +1840,6 @@ def create_app() -> FastAPI:
                 device=lm_device,
                 offload_to_cpu=lm_offload,
                 dtype=handler.dtype,
-                disable_cuda_graphs=True,
             )
             if llm_ok:
                 app.state._llm_initialized = True
