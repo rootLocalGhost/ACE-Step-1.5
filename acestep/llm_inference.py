@@ -3,9 +3,11 @@
 Handles all LM-related operations including initialization and generation
 """
 import os
+import sys
 import traceback
 import time
 import random
+import warnings
 from typing import Optional, Dict, Any, Tuple, List, Union
 from contextlib import contextmanager
 
@@ -22,6 +24,18 @@ from transformers.generation.logits_process import (
 from acestep.constrained_logits_processor import MetadataConstrainedLogitsProcessor
 from acestep.constants import DEFAULT_LM_INSTRUCTION, DEFAULT_LM_UNDERSTAND_INSTRUCTION, DEFAULT_LM_INSPIRED_INSTRUCTION, DEFAULT_LM_REWRITE_INSTRUCTION
 from acestep.gpu_config import get_lm_gpu_memory_ratio, get_gpu_memory_gb, get_lm_model_size, get_global_gpu_config
+
+
+def _warn_if_prerelease_python():
+    v = sys.version_info
+    if getattr(v, "releaselevel", "final") != "final" and sys.platform.startswith("linux"):
+        warnings.warn(
+            f"Detected pre-release Python {sys.version.split()[0]} ({getattr(v, 'releaselevel', '')}). "
+            "This is known to cause segmentation faults with vLLM/nano-vllm on Linux. "
+            "Please install a stable Python release (e.g. 3.11.12+), or use --backend pt as a workaround.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 class LLMHandler:
@@ -406,7 +420,7 @@ class LLMHandler:
 
             # Initialize based on user-selected backend
             if backend == "vllm":
-                # Try to initialize with vllm (LM always uses CUDA graphs for best performance)
+                _warn_if_prerelease_python()
                 status_msg = self._initialize_5hz_lm_vllm(full_lm_model_path, enforce_eager=False)
                 logger.info(f"5Hz LM status message: {status_msg}")
                 # Check if initialization failed (status_msg starts with ❌)

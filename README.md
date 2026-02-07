@@ -117,6 +117,18 @@ Date of the program this worked:
 ACE-Step1.5 Rocm Manual for cachy-os and tested with RDNA4.
 Look into docs\en\ACE-Step1.5-Rocm-Manual-Linux.md
 
+### Linux + Python 3.11 note
+
+Some Linux distributions (including Ubuntu) ship Python 3.11.0rc1, which is a **pre-release** build. This version is known to cause segmentation faults when using the vLLM backend due to C-extension incompatibilities.
+
+**Recommendation:** Use a stable Python release (≥ 3.11.12). On Ubuntu, this can be installed via the deadsnakes PPA.
+
+If upgrading Python is not possible, use the PyTorch backend:
+
+```bash
+uv run acestep --backend pt
+```
+
 ### 🪟 Windows Portable Package (Recommended for Windows)
 
 For Windows users, we provide a portable package with pre-installed dependencies:
