@@ -7,15 +7,60 @@ Independent audio file operations outside of handler, supporting:
 - Batch processing
 """
 
-import os
-import hashlib
+
+import io
 import json
+import os
+import subprocess
+import hashlib
 from pathlib import Path
 from typing import Union, Optional, List, Tuple
 import torch
 import numpy as np
 import torchaudio
 from loguru import logger
+
+
+def normalize_audio(audio_data: Union[torch.Tensor, np.ndarray], target_db: float = -1.0) -> Union[torch.Tensor, np.ndarray]:
+    """
+    Apply peak normalization to audio data.
+    
+    Args:
+        audio_data: Audio data as torch.Tensor or numpy.ndarray
+        target_db: Target peak level in dB (default: -1.0)
+        
+    Returns:
+        Normalized audio data in the same format as input
+    """
+    # Create a copy to avoid modifying original in-place
+    if isinstance(audio_data, torch.Tensor):
+        audio = audio_data.clone()
+        is_tensor = True
+    else:
+        audio = audio_data.copy()
+        is_tensor = False
+        
+    # Calculate current peak
+    if is_tensor:
+        peak = torch.max(torch.abs(audio))
+    else:
+        peak = np.max(np.abs(audio))
+        
+    # Handle silence/near-silence to avoid division by zero or extreme gain
+    if peak < 1e-6:
+        return audio_data
+        
+    # Convert target dB to linear amplitude
+    target_amp = 10 ** (target_db / 20.0)
+    
+    # Calculate needed gain
+    gain = target_amp / peak
+    
+    # Apply gain
+    audio = audio * gain
+    
+    return audio
+
 
 
 class AudioSaver:
@@ -29,7 +74,7 @@ class AudioSaver:
             default_format: Default save format ('flac', 'wav', 'mp3')
         """
         self.default_format = default_format.lower()
-        if self.default_format not in ["flac", "wav", "mp3"]:
+        if self.default_format not in ["flac", "wav", "mp3", "wav32"]:
             logger.warning(f"Unsupported format {default_format}, using 'flac'")
             self.default_format = "flac"
     
@@ -48,14 +93,14 @@ class AudioSaver:
             audio_data: Audio data, torch.Tensor [channels, samples] or numpy.ndarray
             output_path: Output file path (extension can be omitted)
             sample_rate: Sample rate
-            format: Audio format ('flac', 'wav', 'mp3'), defaults to default_format
+            format: Audio format ('flac', 'wav', 'mp3', 'wav32'), defaults to default_format
             channels_first: If True, tensor format is [channels, samples], else [samples, channels]
         
         Returns:
             Actual saved file path
         """
         format = (format or self.default_format).lower()
-        if format not in ["flac", "wav", "mp3"]:
+        if format not in ["flac", "wav", "mp3", "wav32"]:
             logger.warning(f"Unsupported format {format}, using {self.default_format}")
             format = self.default_format
         
@@ -96,8 +141,29 @@ class AudioSaver:
                     channels_first=True,
                     backend='ffmpeg',
                 )
-            elif format in ["flac", "wav"]:
+            elif format in ["flac", "wav", "wav32"]:
                 # FLAC and WAV use soundfile backend (fastest)
+                # handle 32-bit float wav
+                if format == "wav32":
+                    try:
+                        import soundfile as sf
+                        # Ensure extension is .wav
+                        if output_path.suffix.lower() == ".wav32":
+                            output_path = output_path.with_suffix(".wav")
+                        
+                        # torchaudio.save doesn't easily support subtype with soundfile backend in all versions
+                        # so we use soundfile directly for 32-bit float
+                        audio_np = audio_tensor.transpose(0, 1).numpy() # [channels, samples] -> [samples, channels]
+                        
+                        # Explicitly specify format as WAV to avoid issues with extension detection or custom extensions
+                        sf.write(str(output_path), audio_np, sample_rate, subtype='FLOAT', format='WAV')
+                        logger.debug(f"[AudioSaver] Saved audio to {output_path} (wav32, {sample_rate}Hz)")
+                        return str(output_path)
+                    except Exception as e:
+                        logger.error(f"Failed to save wav32: {e}, falling back to standard wav")
+                        format = "wav"
+                        # Fallthrough to standard wav saving
+
                 torchaudio.save(
                     str(output_path),
                     audio_tensor,
@@ -299,33 +365,6 @@ def generate_uuid_from_audio_data(
 
 # Global default instance
 _default_saver = AudioSaver(default_format="flac")
-
-SILENT_RMS_THRESHOLD = 1e-5
-SILENT_PEAK_THRESHOLD = 1e-5
-
-
-def is_audio_silent(
-    audio_data: Union[torch.Tensor, np.ndarray],
-    rms_threshold: float = SILENT_RMS_THRESHOLD,
-    peak_threshold: float = SILENT_PEAK_THRESHOLD,
-    channels_first: bool = True,
-) -> Tuple[bool, float, float]:
-    """
-    Check if audio is silent or near-silent (e.g. zeroed conditioning output).
-    Returns (is_silent, rms, peak) where rms/peak are computed over the full signal.
-    """
-    if audio_data is None:
-        return True, 0.0, 0.0
-    if isinstance(audio_data, np.ndarray):
-        x = np.asarray(audio_data, dtype=np.float64).ravel()
-    else:
-        x = audio_data.cpu().float().numpy().ravel()
-    if x.size == 0:
-        return True, 0.0, 0.0
-    rms = float(np.sqrt(np.mean(x * x)))
-    peak = float(np.max(np.abs(x)))
-    is_silent = rms <= rms_threshold and peak <= peak_threshold
-    return is_silent, rms, peak
 
 
 def save_audio(
