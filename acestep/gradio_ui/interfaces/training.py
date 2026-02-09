@@ -153,12 +153,12 @@ def create_training_section(dit_handler, llm_handler, init_params=None) -> dict:
                 
                 with gr.Row():
                     with gr.Column(scale=3):
-                        gr.Markdown("""
-                        Click the button below to automatically generate metadata for all audio files using AI:
-                        - **Caption**: Music style, genre, mood description
-                        - **BPM**: Beats per minute
-                        - **Key**: Musical key (e.g., C Major, Am)
-                        - **Time Signature**: 4/4, 3/4, etc.
+                        gr.Markdown(f"""
+                        {t('training.step2_instruction')}
+                        - {t('training.step2_caption_desc')}
+                        - {t('training.step2_bpm_desc')}
+                        - {t('training.step2_key_desc')}
+                        - {t('training.step2_timesig_desc')}
                         """)
                         skip_metas = gr.Checkbox(
                             label=t("training.skip_metas"),
@@ -304,12 +304,12 @@ def create_training_section(dit_handler, llm_handler, init_params=None) -> dict:
                 
                 gr.HTML(f"<hr><h3>⚡ {t('training.step5_title')}</h3>")
                 
-                gr.Markdown("""
-                **Preprocessing converts your dataset to pre-computed tensors for fast training.**
+                gr.Markdown(f"""
+                {t('training.step5_intro_header')}
                 
-                You can either:
-                - Use the dataset from Steps 1-4 above, **OR**
-                - Load an existing dataset JSON file (if you've already saved one)
+                {t('training.step5_intro_options')}
+                {t('training.step5_intro_option1')}
+                {t('training.step5_intro_option2')}
                 """)
                 
                 with gr.Row():
@@ -331,14 +331,14 @@ def create_training_section(dit_handler, llm_handler, init_params=None) -> dict:
                     interactive=False,
                 )
                 
-                gr.Markdown("""
-                This step:
-                - Encodes audio to VAE latents
-                - Encodes captions and lyrics to text embeddings  
-                - Runs the condition encoder
-                - Saves all tensors to `.pt` files
+                gr.Markdown(f"""
+                {t('training.step5_details_header')}
+                {t('training.step5_details_line1')}
+                {t('training.step5_details_line2')}
+                {t('training.step5_details_line3')}
+                {t('training.step5_details_line4')}
                 
-                ⚠️ **This requires the model to be loaded and may take a few minutes.**
+                {t('training.step5_details_warning')}
                 """)
                 
                 with gr.Row():
@@ -368,9 +368,9 @@ def create_training_section(dit_handler, llm_handler, init_params=None) -> dict:
                     with gr.Column(scale=2):
                         gr.HTML(f"<h3>📊 {t('training.train_section_tensors')}</h3>")
                         
-                        gr.Markdown("""
-                        Select the directory containing preprocessed tensor files (`.pt` files).
-                        These are created in the "Dataset Builder" tab using the "Preprocess" button.
+                        gr.Markdown(f"""
+                        {t('training.train_tensor_selection_desc1')}
+                        {t('training.train_tensor_selection_desc2')}
                         """)
                         
                         training_tensor_dir = gr.Textbox(
