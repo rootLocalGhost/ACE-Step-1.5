@@ -610,9 +610,12 @@ class LoRATrainer:
                     ema_loss = avg_epoch_loss
                 else:
                     ema_loss = ema_alpha * avg_epoch_loss + (1 - ema_alpha) * ema_loss
-                training_state["plot_steps"].append(global_step)
-                training_state["plot_loss"].append(avg_epoch_loss)
-                training_state["plot_ema"].append(ema_loss)
+                # Avoid duplicating the last step if it was already logged in the batch loop
+                plot_steps = training_state["plot_steps"]
+                if not plot_steps or plot_steps[-1] != global_step:
+                    training_state["plot_steps"].append(global_step)
+                    training_state["plot_loss"].append(avg_epoch_loss)
+                    training_state["plot_ema"].append(ema_loss)
             self.fabric.log("train/epoch_loss", avg_epoch_loss, step=epoch + 1)
             yield global_step, avg_epoch_loss, f"✅ Epoch {epoch+1}/{self.training_config.max_epochs} in {epoch_time:.1f}s, Loss: {avg_epoch_loss:.4f}"
 
