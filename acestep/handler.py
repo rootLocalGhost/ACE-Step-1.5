@@ -2109,6 +2109,13 @@ class AceStepHandler(LoraManagerMixin, ProgressMixin):
                 target_wavs = target_wavs.to(self.device)
             
             with self._load_model_context("vae"):
+                # Detect whether all non-code-hint, non-silent batch items
+                # share the same audio content (e.g. cover task where every
+                # item comes from the same processed_src_audio).  If so, we
+                # VAE-encode only once and reuse the latent for all of them.
+                _cached_wav_ref: Optional[torch.Tensor] = None   # first encoded wav (on device)
+                _cached_latent: Optional[torch.Tensor] = None    # its VAE latent
+
                 for i in range(batch_size):
                     code_hint = audio_code_hints[i]
                     # Prefer decoding from provided audio codes
@@ -2129,9 +2136,21 @@ class AceStepHandler(LoraManagerMixin, ProgressMixin):
                         expected_latent_length = current_wav.shape[-1] // 1920
                         target_latent = self.silence_latent[0, :expected_latent_length, :]
                     else:
-                        # Encode using helper method
-                        logger.info(f"[generate_music] Encoding target audio to latents for item {i}...")
-                        target_latent = self._encode_audio_to_latents(current_wav.squeeze(0))  # Remove batch dim for helper
+                        # Check if this wav is identical to a previously encoded
+                        # one so we can skip the expensive VAE encode.
+                        if (_cached_wav_ref is not None
+                                and _cached_latent is not None
+                                and _cached_wav_ref.shape == current_wav.shape
+                                and torch.equal(_cached_wav_ref, current_wav)):
+                            logger.info(f"[generate_music] Reusing cached VAE latents for item {i} (same audio as previous item)")
+                            target_latent = _cached_latent.clone()
+                        else:
+                            # Encode using helper method
+                            logger.info(f"[generate_music] Encoding target audio to latents for item {i}...")
+                            target_latent = self._encode_audio_to_latents(current_wav.squeeze(0))  # Remove batch dim for helper
+                            # Cache for potential reuse by subsequent items
+                            _cached_wav_ref = current_wav
+                            _cached_latent = target_latent
                     target_latents_list.append(target_latent)
                     latent_lengths.append(target_latent.shape[0])
              
@@ -2487,6 +2506,11 @@ class AceStepHandler(LoraManagerMixin, ProgressMixin):
                 z = z.unsqueeze(0)
             return z
 
+        # Cache for VAE-encoded refer audio latents keyed by data_ptr to avoid
+        # redundant encodes when the same reference audio is shared across batch
+        # items (e.g. user uploads one reference audio with batch_size > 1).
+        _refer_encode_cache: Dict[int, torch.Tensor] = {}
+
         for batch_idx, refer_audios in enumerate(refer_audioss):
             if len(refer_audios) == 1 and torch.all(refer_audios[0] == 0.0):
                 refer_audio_latent = _ensure_latent_3d(self.silence_latent[:, :750, :])
@@ -2494,16 +2518,23 @@ class AceStepHandler(LoraManagerMixin, ProgressMixin):
                 refer_audio_order_mask.append(batch_idx)
             else:
                 for refer_audio in refer_audios:
-                    refer_audio = _normalize_audio_2d(refer_audio)
-                    # Use tiled_encode for memory-efficient encoding of long audio
-                    with torch.inference_mode():
-                        refer_audio_latent = self.tiled_encode(refer_audio, offload_latent_to_cpu=True)
-                    # Move to device and cast to model dtype
-                    refer_audio_latent = refer_audio_latent.to(self.device).to(self.dtype)
-                    # Ensure 3D before transpose: [C, T] -> [1, C, T] -> [1, T, C]
-                    if refer_audio_latent.dim() == 2:
-                        refer_audio_latent = refer_audio_latent.unsqueeze(0)
-                    refer_audio_latents.append(_ensure_latent_3d(refer_audio_latent.transpose(1, 2)))
+                    cache_key = refer_audio.data_ptr()
+                    if cache_key in _refer_encode_cache:
+                        # Reuse cached latent for identical reference audio
+                        refer_audio_latent = _refer_encode_cache[cache_key].clone()
+                    else:
+                        refer_audio = _normalize_audio_2d(refer_audio)
+                        # Use tiled_encode for memory-efficient encoding of long audio
+                        with torch.inference_mode():
+                            refer_audio_latent = self.tiled_encode(refer_audio, offload_latent_to_cpu=True)
+                        # Move to device and cast to model dtype
+                        refer_audio_latent = refer_audio_latent.to(self.device).to(self.dtype)
+                        # Ensure 3D before transpose: [C, T] -> [1, C, T] -> [1, T, C]
+                        if refer_audio_latent.dim() == 2:
+                            refer_audio_latent = refer_audio_latent.unsqueeze(0)
+                        refer_audio_latent = _ensure_latent_3d(refer_audio_latent.transpose(1, 2))
+                        _refer_encode_cache[cache_key] = refer_audio_latent
+                    refer_audio_latents.append(refer_audio_latent)
                     refer_audio_order_mask.append(batch_idx)
 
         refer_audio_latents = torch.cat(refer_audio_latents, dim=0)
