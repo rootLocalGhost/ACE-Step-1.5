@@ -27,6 +27,14 @@ except ImportError:
     LIGHTNING_AVAILABLE = False
     logger.warning("Lightning Fabric not installed. Training will use basic training loop.")
 
+# OPTIMIZATION: Use 8-bit Adam to save some VRAM
+try:
+    import bitsandbytes as bnb
+    HAS_BNB = True
+except ImportError:
+    HAS_BNB = False
+    logger.warning("bitsandbytes not installed. Using standard AdamW.")
+
 from acestep.training.configs import LoRAConfig, TrainingConfig
 from acestep.training.lora_utils import (
     inject_lora_into_dit,
@@ -579,9 +587,15 @@ class LoRATrainer:
             "lr": self.training_config.learning_rate,
             "weight_decay": self.training_config.weight_decay,
         }
-        if self.module.device.type == "cuda":
-            optimizer_kwargs["fused"] = True
-        optimizer = AdamW(trainable_params, **optimizer_kwargs)
+
+        # Optimizer selection: AdamW 8-bit vs Standard AdamW
+        if HAS_BNB and device_type == "cuda":
+            logger.info("train_with_fabric using bitsandbytes 8-bit AdamW optimizer")
+            optimizer = bnb.optim.AdamW8bit(trainable_params, **optimizer_kwargs)
+        else:
+            if self.module.device.type == "cuda":
+                optimizer_kwargs["fused"] = True
+            optimizer = AdamW(trainable_params, **optimizer_kwargs)
         
         # Calculate total steps
         steps_per_epoch = max(1, math.ceil(len(train_loader) / self.training_config.gradient_accumulation_steps))
@@ -879,11 +893,19 @@ class LoRATrainer:
             yield 0, 0.0, "❌ No trainable parameters found!"
             return
         
-        optimizer = AdamW(
-            trainable_params,
-            lr=self.training_config.learning_rate,
-            weight_decay=self.training_config.weight_decay,
-        )
+        if HAS_BNB and self.module.device_type == "cuda":
+            optimizer = bnb.optim.AdamW8bit(
+                trainable_params,
+                lr=self.training_config.learning_rate,
+                weight_decay=self.training_config.weight_decay,
+            )
+            logger.info("train_basic using bitsandbytes 8-bit AdamW optimizer")
+        else:
+            optimizer = AdamW(
+                trainable_params,
+                lr=self.training_config.learning_rate,
+                weight_decay=self.training_config.weight_decay,
+            )
         
         steps_per_epoch = max(1, math.ceil(len(train_loader) / self.training_config.gradient_accumulation_steps))
         total_steps = steps_per_epoch * self.training_config.max_epochs
