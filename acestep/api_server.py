@@ -1585,11 +1585,30 @@ def create_app() -> FastAPI:
 
                 # Build GenerationConfig - default to 2 audios like gradio_ui
                 batch_size = req.batch_size if req.batch_size is not None else 2
+
+                # Resolve seed(s) from req.seed into List[int] for GenerationConfig.seeds
+                resolved_seeds = None
+                if not req.use_random_seed and req.seed is not None:
+                    if isinstance(req.seed, int):
+                        if req.seed >= 0:
+                            resolved_seeds = [req.seed]
+                    elif isinstance(req.seed, str):
+                        resolved_seeds = []
+                        for s in req.seed.split(","):
+                            s = s.strip()
+                            if s and s != "-1":
+                                try:
+                                    resolved_seeds.append(int(float(s)))
+                                except (ValueError, TypeError):
+                                    pass
+                        if not resolved_seeds:
+                            resolved_seeds = None
+
                 config = GenerationConfig(
                     batch_size=batch_size,
                     allow_lm_batch=req.allow_lm_batch,
                     use_random_seed=req.use_random_seed,
-                    seeds=None,  # Let unified logic handle seed generation
+                    seeds=resolved_seeds,
                     audio_format=req.audio_format,
                     constrained_decoding_debug=req.constrained_decoding_debug,
                 )

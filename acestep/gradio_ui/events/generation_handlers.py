@@ -478,8 +478,11 @@ def init_service_wrapper(dit_handler, llm_handler, checkpoint, config_path, devi
     
     # Validate LM request against GPU tier
     if init_llm and not gpu_config.available_lm_models:
-        init_llm = False  # Force disable LM on tiers that can't support it
-        logger.warning(f"⚠️ LM initialization disabled: GPU tier {gpu_config.tier} ({gpu_config.gpu_memory_gb:.1f}GB) does not support LM")
+        logger.warning(
+            f"⚠️ GPU tier {gpu_config.tier} ({gpu_config.gpu_memory_gb:.1f}GB) does not support LM on GPU. "
+            "Falling back to CPU for LM initialization."
+        )
+        llm_handler.device = "cpu"
     
     # Warn (but respect) if the selected LM model exceeds the tier's recommendation
     if init_llm and lm_model_path and gpu_config.available_lm_models:
@@ -515,7 +518,7 @@ def init_service_wrapper(dit_handler, llm_handler, checkpoint, config_path, devi
             checkpoint_dir=checkpoint_dir,
             lm_model_path=lm_model_path,
             backend=backend,
-            device=device,
+            device=llm_handler.device,
             offload_to_cpu=offload_to_cpu,
             dtype=None,
         )
