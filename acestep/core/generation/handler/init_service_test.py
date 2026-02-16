@@ -43,7 +43,7 @@ def _load_init_service_module():
 
 INIT_SERVICE_MODULE = _load_init_service_module()
 InitServiceMixin = INIT_SERVICE_MODULE.InitServiceMixin
-INIT_SERVICE_LOADER_MODULE = importlib.import_module("acestep.core.generation.handler.init_service_loader")
+INIT_SERVICE_DOWNLOADS_MODULE = importlib.import_module("acestep.core.generation.handler.init_service_downloads")
 INIT_SERVICE_MEMORY_BASIC_MODULE = importlib.import_module("acestep.core.generation.handler.init_service_memory_basic")
 
 
@@ -211,7 +211,7 @@ class InitServiceMixinTests(unittest.TestCase):
         """It prefers CUDA first when resolving the ``auto`` device mode."""
         host = _Host(project_root="K:/fake_root", device="auto")
         with patch("torch.cuda.is_available", return_value=True):
-            with patch("torch.backends.mps.is_available", return_value=False):
+            with patch("torch.backends.mps.is_available", return_value=False, create=True):
                 with patch("torch.xpu", new=types.SimpleNamespace(is_available=lambda: False), create=True):
                     self.assertEqual(host._resolve_initialize_device("auto"), "cuda")
 
@@ -243,7 +243,7 @@ class InitServiceMixinTests(unittest.TestCase):
         """It falls back from CUDA to CPU when no accelerator backends are available."""
         host = _Host(project_root="K:/fake_root", device="cuda")
         with patch("torch.cuda.is_available", return_value=False):
-            with patch("torch.backends.mps.is_available", return_value=False):
+            with patch("torch.backends.mps.is_available", return_value=False, create=True):
                 with patch("torch.xpu", new=types.SimpleNamespace(is_available=lambda: False), create=True):
                     self.assertEqual(host._resolve_initialize_device("cuda"), "cpu")
 
@@ -251,27 +251,27 @@ class InitServiceMixinTests(unittest.TestCase):
         """It falls back from CUDA to MPS when MPS is the first available backend."""
         host = _Host(project_root="K:/fake_root", device="cuda")
         with patch("torch.cuda.is_available", return_value=False):
-            with patch("torch.backends.mps.is_available", return_value=True):
+            with patch("torch.backends.mps.is_available", return_value=True, create=True):
                 with patch("torch.xpu", new=types.SimpleNamespace(is_available=lambda: True), create=True):
                     self.assertEqual(host._resolve_initialize_device("cuda"), "mps")
 
     def test_validate_quantization_setup_requires_compile_model(self):
-        """It raises assertion when quantization is requested without compile mode."""
+        """It raises ValueError when quantization is requested without compile mode."""
         host = _Host(project_root="K:/fake_root", device="cpu")
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             host._validate_quantization_setup(quantization="int8_weight_only", compile_model=False)
 
     def test_ensure_models_present_returns_download_error_when_main_model_fails(self):
         """It returns an error tuple when main model download fails."""
         host = _Host(project_root="K:/fake_root", device="cpu")
-        with patch.object(INIT_SERVICE_LOADER_MODULE, "check_main_model_exists", return_value=False):
-            with patch.object(INIT_SERVICE_LOADER_MODULE, "ensure_main_model", return_value=(False, "boom")):
+        with patch.object(INIT_SERVICE_DOWNLOADS_MODULE, "check_main_model_exists", return_value=False):
+            with patch.object(INIT_SERVICE_DOWNLOADS_MODULE, "ensure_main_model", return_value=(False, "boom")):
                 result = host._ensure_models_present(
                     checkpoint_path=Path("K:/fake_root/checkpoints"),
                     config_path="acestep-v15-turbo",
                     prefer_source=None,
                 )
-        self.assertEqual(result, ("âŒ Failed to download main model: boom", False))
+        self.assertEqual(result, ("ERROR: Failed to download main model: boom", False))
 
     def test_build_initialize_status_message_reports_mlx_compile_label(self):
         """It renders the mx.compile label when MLX compile redirection is active."""
@@ -317,6 +317,36 @@ class InitServiceMixinTests(unittest.TestCase):
             )
         self.assertEqual(status, "download failed")
         self.assertFalse(ok)
+
+    def test_initialize_service_uses_provided_project_root_for_checkpoints(self):
+        """It builds checkpoint paths from the provided project_root when truthy."""
+        host = _Host(project_root="K:/fallback_root", device="cpu")
+
+        def _fake_load_main_model(**kwargs):
+            """Capture model path and initialize minimal config state."""
+            host._captured_model_path = kwargs["model_checkpoint_path"]
+            host.config = types.SimpleNamespace(_attn_implementation="sdpa")
+            host.model = object()
+
+        with patch.object(host, "_ensure_models_present", return_value=None):
+            with patch.object(host, "_sync_model_code_if_needed"):
+                with patch.object(host, "_load_main_model_from_checkpoint", side_effect=_fake_load_main_model):
+                    with patch.object(host, "_load_vae_model", return_value="K:/custom_root/checkpoints/vae"):
+                        with patch.object(
+                            host,
+                            "_load_text_encoder_and_tokenizer",
+                            return_value="K:/custom_root/checkpoints/Qwen3-Embedding-0.6B",
+                        ):
+                            with patch.object(host, "_initialize_mlx_backends", return_value=("Disabled", "Disabled")):
+                                status, ok = host.initialize_service(
+                                    project_root="K:/custom_root",
+                                    config_path="acestep-v15-turbo",
+                                    device="cpu",
+                                )
+        self.assertTrue(ok)
+        expected_model_path = os.path.normpath("K:/custom_root/checkpoints/acestep-v15-turbo")
+        self.assertEqual(os.path.normpath(host._captured_model_path), expected_model_path)
+        self.assertIn(expected_model_path, os.path.normpath(status))
 
     def test_initialize_service_success_uses_decomposed_helpers(self):
         """It executes decomposed helper calls and returns a success status payload."""
@@ -463,7 +493,7 @@ class InitServiceMixinTests(unittest.TestCase):
     def test_empty_cache_routes_to_mps(self):
         """It routes cache clearing to MPS when the host device is MPS."""
         host = _Host(project_root="K:/fake_root", device="mps")
-        with patch("torch.backends.mps.is_available", return_value=True), patch("torch.mps.empty_cache") as empty_cache:
+        with patch("torch.backends.mps.is_available", return_value=True, create=True), patch("torch.mps.empty_cache") as empty_cache:
             host._empty_cache()
             empty_cache.assert_called_once()
 
@@ -486,7 +516,7 @@ class InitServiceMixinTests(unittest.TestCase):
     def test_synchronize_routes_to_mps(self):
         """It routes synchronization to MPS when the host device is MPS."""
         host = _Host(project_root="K:/fake_root", device="mps")
-        with patch("torch.backends.mps.is_available", return_value=True), patch("torch.mps.synchronize") as sync:
+        with patch("torch.backends.mps.is_available", return_value=True, create=True), patch("torch.mps.synchronize") as sync:
             host._synchronize()
             sync.assert_called_once()
 

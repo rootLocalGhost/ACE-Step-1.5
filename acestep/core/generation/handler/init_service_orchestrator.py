@@ -55,7 +55,8 @@ class InitServiceOrchestratorMixin:
                 compile_model=normalized_compile,
             )
 
-            checkpoint_dir = os.path.join(self._get_project_root(), "checkpoints")
+            base_root = project_root or self._get_project_root()
+            checkpoint_dir = os.path.join(base_root, "checkpoints")
             checkpoint_path = Path(checkpoint_dir)
 
             precheck_failure = self._ensure_models_present(
@@ -128,6 +129,7 @@ class InitServiceOrchestratorMixin:
             self.text_tokenizer = None
             self.config = None
             self.silence_latent = None
-            error_msg = f"âŒ Error initializing model: {str(exc)}\n\nTraceback:\n{traceback.format_exc()}"
-            logger.exception("[initialize_service] Error initializing model")
+            error_msg = f"Error initializing model: {str(exc)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.exception(error_msg)
             return error_msg, False
+

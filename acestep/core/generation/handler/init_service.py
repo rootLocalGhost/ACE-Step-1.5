@@ -1,6 +1,7 @@
 """Facade mixin that composes initialization helper modules."""
 
 from .init_service_catalog import InitServiceCatalogMixin
+from .init_service_downloads import InitServiceDownloadsMixin
 from .init_service_loader import InitServiceLoaderMixin
 from .init_service_memory_basic import InitServiceMemoryBasicMixin
 from .init_service_memory_transfer import InitServiceMemoryTransferMixin
@@ -12,6 +13,7 @@ from .init_service_setup import InitServiceSetupMixin
 class InitServiceMixin(
     InitServiceCatalogMixin,
     InitServiceSetupMixin,
+    InitServiceDownloadsMixin,
     InitServiceLoaderMixin,
     InitServiceOrchestratorMixin,
     InitServiceMemoryBasicMixin,

@@ -101,7 +101,8 @@ class InitServiceSetupMixin:
         """Validate quantization prerequisites before model loading."""
         if quantization is None:
             return
-        assert compile_model, "Quantization requires compile_model to be True"
+        if not compile_model:
+            raise ValueError("Quantization requires compile_model to be True")
         try:
             import torchao  # noqa: F401
         except ImportError as exc:

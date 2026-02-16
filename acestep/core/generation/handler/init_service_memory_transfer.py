@@ -50,8 +50,11 @@ class InitServiceMemoryTransferMixin:
                 attr = getattr(module, attr_name, None)
                 if isinstance(attr, torch.nn.Module) and id(attr) not in visited:
                     self._move_module_recursive(attr, target_device, dtype, visited)
-            except Exception:
-                pass
+            except (AttributeError, TypeError) as exc:
+                log = getattr(self, "logger", logger)
+                log.warning(
+                    f"[_move_module_recursive] Skipping attr '{attr_name}' during recursive move: {exc}"
+                )
 
     def _move_quantized_param(self, param, target_device):
         """Move an AffineQuantizedTensor to target device using ``_apply_fn_to_data`` when available."""

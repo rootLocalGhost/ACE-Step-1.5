@@ -61,7 +61,7 @@ class InitServiceCatalogMixin:
             return False
 
         try:
-            import flash_attn  # noqa: F401
+            import flash_attn
             return True
         except ImportError:
             return False
