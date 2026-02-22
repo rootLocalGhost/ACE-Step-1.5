@@ -1,7 +1,7 @@
 """Shared defaults/helpers for generation interface builders."""
 
 import sys
-from typing import Any, Optional
+from typing import Any
 
 from acestep.gpu_config import GPUConfig, get_global_gpu_config
 from acestep.ui.gradio.events.generation_handlers import is_pure_base_model
@@ -25,7 +25,7 @@ def compute_init_defaults(
     service_mode = init_params is not None and init_params.get("service_mode", False)
     current_language = init_params.get("language", language) if init_params else language
 
-    gpu_config: Optional[GPUConfig] = init_params.get("gpu_config") if init_params else None
+    gpu_config: GPUConfig | None = init_params.get("gpu_config") if init_params else None
     if gpu_config is None:
         gpu_config = get_global_gpu_config()
 

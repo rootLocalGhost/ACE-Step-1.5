@@ -48,7 +48,7 @@ def build_service_toggles(
     with gr.Row():
         lm_info_text = t("service.init_llm_info")
         if not gpu_config.available_lm_models:
-            lm_info_text += " \u26a0\ufe0f LM not available for this GPU tier (VRAM too low)"
+            lm_info_text += " " + t("service.lm_unavailable_vram")
         init_llm_checkbox = gr.Checkbox(
             label=t("service.init_llm_label"),
             value=params.get("init_llm", init_lm_default) if service_pre_initialized else init_lm_default,

@@ -22,27 +22,34 @@ except ImportError:
 class GenerationDecompositionContractTests(unittest.TestCase):
     """Verify that generation interface facade delegates to focused helpers."""
 
-    def test_generation_facade_imports_and_wraps_new_helpers(self):
-        """`generation.py` should import helper modules and merge section dicts."""
+    def test_generation_facade_imports(self):
+        """`generation.py` should import advanced-settings, service, and tab helpers."""
 
         module = load_module("generation.py")
         imported_modules = []
-        call_names = []
-        update_calls = 0
-
         for node in ast.walk(module):
             if isinstance(node, ast.ImportFrom) and node.module:
                 imported_modules.append(node.module)
-            if isinstance(node, ast.Call):
-                name = call_name(node.func)
-                if name:
-                    call_names.append(name)
-                if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
-                    update_calls += 1
 
         self.assertIn("generation_advanced_settings", imported_modules)
         self.assertIn("generation_service_config", imported_modules)
         self.assertIn("generation_tab_section", imported_modules)
+
+    def test_generation_facade_merges_sections(self):
+        """`generation.py` should compose settings/tab sections into a merged map."""
+
+        module = load_module("generation.py")
+        call_names = []
+        update_calls = 0
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            name = call_name(node.func)
+            if name:
+                call_names.append(name)
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
+                update_calls += 1
+
         self.assertIn("create_advanced_settings_section", call_names)
         self.assertIn("create_generation_tab_section", call_names)
         self.assertGreaterEqual(update_calls, 2)

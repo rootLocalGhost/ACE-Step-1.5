@@ -16,9 +16,13 @@ from acestep.constants import (
 
 
 def is_pure_base_model(config_path_lower: str) -> bool:
-    """Check if a model path refers to a pure base model (not SFT or turbo).
+    """Check whether a model path refers to a pure base model.
 
-    Only pure base models support extended tasks (Extract, Lego, Complete).
+    Args:
+        config_path_lower: Lowercased model config path string.
+
+    Returns:
+        ``True`` when the path contains ``"base"`` and excludes ``"sft"`` and ``"turbo"``.
     """
     return (
         "base" in config_path_lower

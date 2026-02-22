@@ -7,8 +7,8 @@ import gradio as gr
 from acestep.constants import DEFAULT_DIT_INSTRUCTION
 from acestep.ui.gradio.i18n import t
 
-from .generation_tab_simple_controls import build_simple_mode_controls  # noqa: F401
-from .generation_tab_source_controls import build_source_track_and_code_controls  # noqa: F401
+from .generation_tab_simple_controls import build_simple_mode_controls
+from .generation_tab_source_controls import build_source_track_and_code_controls
 
 
 def build_mode_selector_controls(initial_mode_choices: list[str]) -> dict[str, Any]:

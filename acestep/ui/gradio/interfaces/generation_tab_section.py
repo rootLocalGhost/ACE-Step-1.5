@@ -48,6 +48,7 @@ def create_generation_tab_section(
         A merged component map for generation-tab controls and runtime metadata.
     """
 
+    _ = llm_handler  # retained for caller signature parity
     defaults = compute_init_defaults(init_params, language)
     service_pre_initialized = defaults["service_pre_initialized"]
     service_mode = defaults["service_mode"]

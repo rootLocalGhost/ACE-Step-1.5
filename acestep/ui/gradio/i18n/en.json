@@ -43,6 +43,7 @@
     "backend_info": "Select backend for 5Hz LM: vllm (faster) or pt (PyTorch, more compatible).",
     "init_llm_label": "Initialize 5Hz LM",
     "init_llm_info": "Check to initialize 5Hz LM during service initialization.",
+    "lm_unavailable_vram": "⚠️ LM not available for this GPU tier (VRAM too low)",
     "flash_attention_label": "Use Flash Attention",
     "flash_attention_info_enabled": "Enable flash attention for faster inference (requires flash_attn package).",
     "flash_attention_info_disabled": "Flash attention not available (flash_attn package not installed).",

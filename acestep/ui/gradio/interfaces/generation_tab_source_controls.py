@@ -9,14 +9,14 @@ from acestep.ui.gradio.help_content import create_help_button
 from acestep.ui.gradio.i18n import t
 
 
-def build_source_track_and_code_controls() -> dict[str, Any]:
-    """Create source-audio, track-selector, and LM-code hint controls.
+def build_source_audio_controls() -> dict[str, Any]:
+    """Create source-audio controls used by remix/repaint/extract flows.
 
     Args:
         None.
 
     Returns:
-        A component map containing source audio actions, track selectors, and LM code controls.
+        A component map containing ``src_audio_row``, ``src_audio``, ``analyze_btn``, and ``extract_help_group``.
     """
 
     with gr.Row(equal_height=True, visible=False) as src_audio_row:
@@ -30,6 +30,24 @@ def build_source_track_and_code_controls() -> dict[str, Any]:
 
     with gr.Group(visible=False) as extract_help_group:
         create_help_button("generation_extract")
+    return {
+        "src_audio_row": src_audio_row,
+        "src_audio": src_audio,
+        "analyze_btn": analyze_btn,
+        "extract_help_group": extract_help_group,
+    }
+
+
+def build_track_selection_controls() -> dict[str, Any]:
+    """Create track selection controls for extract and complete generation modes.
+
+    Args:
+        None.
+
+    Returns:
+        A component map containing ``track_name``, ``complete_help_group``, and ``complete_track_classes``.
+    """
+
     track_name = gr.Dropdown(
         choices=TRACK_NAMES,
         value=None,
@@ -47,6 +65,22 @@ def build_source_track_and_code_controls() -> dict[str, Any]:
         elem_classes=["has-info-container"],
         visible=False,
     )
+    return {
+        "track_name": track_name,
+        "complete_help_group": complete_help_group,
+        "complete_track_classes": complete_track_classes,
+    }
+
+
+def build_lm_code_hint_controls() -> dict[str, Any]:
+    """Create optional LM code-hint controls for text2music generation.
+
+    Args:
+        None.
+
+    Returns:
+        A component map containing LM code hint controls and action buttons.
+    """
 
     with gr.Accordion(
         t("generation.lm_codes_hints"),
@@ -77,18 +111,40 @@ def build_source_track_and_code_controls() -> dict[str, Any]:
                 size="sm",
                 scale=1,
             )
-
     return {
-        "src_audio_row": src_audio_row,
-        "src_audio": src_audio,
-        "analyze_btn": analyze_btn,
-        "extract_help_group": extract_help_group,
-        "track_name": track_name,
-        "complete_help_group": complete_help_group,
-        "complete_track_classes": complete_track_classes,
         "text2music_audio_codes_group": text2music_audio_codes_group,
         "lm_codes_audio_upload": lm_codes_audio_upload,
         "text2music_audio_code_string": text2music_audio_code_string,
         "convert_src_to_codes_btn": convert_src_to_codes_btn,
         "transcribe_btn": transcribe_btn,
+    }
+
+
+def build_source_track_and_code_controls() -> dict[str, Any]:
+    """Create source-audio, track-selector, and LM-code hint controls.
+
+    Args:
+        None.
+
+    Returns:
+        A component map containing source audio actions, track selectors, and LM code controls.
+    """
+
+    source_audio_controls = build_source_audio_controls()
+    track_selection_controls = build_track_selection_controls()
+    lm_code_hint_controls = build_lm_code_hint_controls()
+
+    return {
+        "src_audio_row": source_audio_controls["src_audio_row"],
+        "src_audio": source_audio_controls["src_audio"],
+        "analyze_btn": source_audio_controls["analyze_btn"],
+        "extract_help_group": source_audio_controls["extract_help_group"],
+        "track_name": track_selection_controls["track_name"],
+        "complete_help_group": track_selection_controls["complete_help_group"],
+        "complete_track_classes": track_selection_controls["complete_track_classes"],
+        "text2music_audio_codes_group": lm_code_hint_controls["text2music_audio_codes_group"],
+        "lm_codes_audio_upload": lm_code_hint_controls["lm_codes_audio_upload"],
+        "text2music_audio_code_string": lm_code_hint_controls["text2music_audio_code_string"],
+        "convert_src_to_codes_btn": lm_code_hint_controls["convert_src_to_codes_btn"],
+        "transcribe_btn": lm_code_hint_controls["transcribe_btn"],
     }
