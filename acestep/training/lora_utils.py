@@ -12,6 +12,9 @@ import types
 
 import torch
 import torch.nn as nn
+from safetensors.torch import load_file
+
+from acestep.training.path_safety import safe_path
 
 try:
     from peft import (
@@ -19,7 +22,6 @@ try:
         LoraConfig,
         TaskType,
         PeftModel,
-        PeftConfig,
     )
     PEFT_AVAILABLE = True
 except ImportError:
@@ -211,6 +213,7 @@ def save_lora_weights(
     Returns:
         Path to saved weights
     """
+    output_dir = safe_path(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     
     if hasattr(model, 'decoder') and hasattr(model.decoder, 'save_pretrained'):
@@ -251,48 +254,33 @@ def load_lora_weights(
     
     Args:
         model: The base model (without LoRA)
-        lora_path: Path to saved LoRA weights (adapter or .pt file)
-        lora_config: LoRA configuration (required if loading from .pt file)
+        lora_path: Path to saved LoRA adapter directory
+        lora_config: Unused; retained for API compatibility
         
     Returns:
         Model with LoRA weights loaded
     """
-    if not os.path.exists(lora_path):
-        raise FileNotFoundError(f"LoRA weights not found: {lora_path}")
+    validated = safe_path(lora_path)
+    if not os.path.exists(validated):
+        raise FileNotFoundError(f"LoRA weights not found: {validated}")
     
     # Check if it's a PEFT adapter directory
-    if os.path.isdir(lora_path):
+    if os.path.isdir(validated):
         if not PEFT_AVAILABLE:
             raise ImportError("PEFT library is required to load adapter. Install with: pip install peft")
         
         # Load PEFT adapter
-        peft_config = PeftConfig.from_pretrained(lora_path)
-        model.decoder = PeftModel.from_pretrained(model.decoder, lora_path)
-        logger.info(f"LoRA adapter loaded from {lora_path}")
+        model.decoder = PeftModel.from_pretrained(model.decoder, validated)
+        logger.info(f"LoRA adapter loaded from {validated}")
     
-    elif lora_path.endswith('.pt'):
-        # Load from PyTorch state dict
-        if lora_config is None:
-            raise ValueError("lora_config is required when loading from .pt file")
-        
-        # First inject LoRA structure
-        model, _ = inject_lora_into_dit(model, lora_config)
-        
-        # Load weights
-        lora_state_dict = torch.load(lora_path, map_location='cpu', weights_only=True)
-        
-        # Load into model
-        model_state = model.state_dict()
-        for name, param in lora_state_dict.items():
-            if name in model_state:
-                model_state[name].copy_(param)
-            else:
-                logger.warning(f"Unexpected key in LoRA state dict: {name}")
-        
-        logger.info(f"LoRA weights loaded from {lora_path}")
+    elif validated.endswith('.pt'):
+        raise ValueError(
+            "Loading LoRA weights from .pt files is disabled for security. "
+            "Use a PEFT adapter directory instead."
+        )
     
     else:
-        raise ValueError(f"Unsupported LoRA weight format: {lora_path}")
+        raise ValueError(f"Unsupported LoRA weight format: {validated}")
     
     return model
 
@@ -318,6 +306,7 @@ def save_training_checkpoint(
     Returns:
         Path to saved checkpoint directory
     """
+    output_dir = safe_path(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     # Save LoRA adapter weights
@@ -368,48 +357,48 @@ def load_training_checkpoint(
         "loaded_scheduler": False,
     }
 
-    # Find adapter path
-    adapter_path = os.path.join(checkpoint_dir, "adapter")
-    if os.path.exists(adapter_path):
+    # Validate checkpoint directory
+    try:
+        safe_dir = safe_path(checkpoint_dir)
+    except ValueError:
+        logger.warning(f"Rejected unsafe checkpoint directory: {checkpoint_dir!r}")
+        return result
+
+    # Find adapter path (safe_dir is already validated)
+    adapter_path = os.path.join(safe_dir, "adapter")
+    if os.path.isdir(adapter_path):
         result["adapter_path"] = adapter_path
-    elif os.path.exists(checkpoint_dir):
-        result["adapter_path"] = checkpoint_dir
+    elif os.path.isdir(safe_dir):
+        result["adapter_path"] = safe_dir
 
-    # Load training state
-    state_path = os.path.join(checkpoint_dir, "training_state.pt")
-    if os.path.exists(state_path):
-        map_location = device if device else "cpu"
-        training_state = torch.load(state_path, map_location=map_location, weights_only=True)
+    # Load training state (use safetensors; avoid unsafe pickle-based torch.load)
+    state_path = os.path.join(safe_dir, "training_state.safetensors")
+    if os.path.isfile(state_path):
+        try:
+            device_str = str(device) if device is not None else "cpu"
+            training_state_tensors = load_file(state_path, device=device_str)
 
-        result["epoch"] = training_state.get("epoch", 0)
-        result["global_step"] = training_state.get("global_step", 0)
+            if "epoch" in training_state_tensors:
+                try:
+                    result["epoch"] = int(training_state_tensors["epoch"].item())
+                except (ValueError, TypeError, RuntimeError) as e:
+                    logger.warning(f"Failed to parse 'epoch' from training_state.safetensors: {e}, using default 0")
+            if "global_step" in training_state_tensors:
+                try:
+                    result["global_step"] = int(training_state_tensors["global_step"].item())
+                except (ValueError, TypeError, RuntimeError) as e:
+                    logger.warning(f"Failed to parse 'global_step' from training_state.safetensors: {e}, using default 0")
 
-        # Load optimizer state if provided
-        if optimizer is not None and "optimizer_state_dict" in training_state:
-            try:
-                optimizer.load_state_dict(training_state["optimizer_state_dict"])
-                result["loaded_optimizer"] = True
-                logger.info("Optimizer state loaded from checkpoint")
-            except Exception as e:
-                logger.warning(f"Failed to load optimizer state: {e}")
-
-        # Load scheduler state if provided
-        if scheduler is not None and "scheduler_state_dict" in training_state:
-            try:
-                scheduler.load_state_dict(training_state["scheduler_state_dict"])
-                result["loaded_scheduler"] = True
-                logger.info("Scheduler state loaded from checkpoint")
-            except Exception as e:
-                logger.warning(f"Failed to load scheduler state: {e}")
-
-        logger.info(f"Loaded checkpoint from epoch {result['epoch']}, step {result['global_step']}")
+            logger.info(f"Loaded checkpoint metadata from epoch {result['epoch']}, step {result['global_step']}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning(f"Failed to load training_state.safetensors: {e}")
     else:
         # Fallback: extract epoch from path
         import re
-        match = re.search(r'epoch_(\d+)', checkpoint_dir)
+        match = re.search(r'epoch_(\d+)', safe_dir)
         if match:
             result["epoch"] = int(match.group(1))
-            logger.info(f"No training_state.pt found, extracted epoch {result['epoch']} from path")
+            logger.info(f"No training_state.safetensors found, extracted epoch {result['epoch']} from path")
 
     return result
 

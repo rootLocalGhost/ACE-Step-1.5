@@ -15,7 +15,7 @@ from loguru import logger
 import torch
 
 
-from acestep.audio_utils import AudioSaver, generate_uuid_from_params, normalize_audio
+from acestep.audio_utils import AudioSaver, generate_uuid_from_params, normalize_audio, get_lora_weights_hash
 
 # HuggingFace Space environment detection
 IS_HUGGINGFACE_SPACE = os.environ.get("SPACE_ID") is not None
@@ -137,6 +137,7 @@ class GenerationParams:
     repainting_start: float = 0.0
     repainting_end: float = -1
     audio_cover_strength: float = 1.0
+    cover_noise_strength: float = 0.0  # 0=pure noise (no cover), 1=closest to src audio
 
     # 5Hz Language Model Parameters
     thinking: bool = True
@@ -178,7 +179,7 @@ class GenerationConfig:
             - int: Single seed value (will be converted to list and padded)
         lm_batch_chunk_size: Batch chunk size for LM processing
         constrained_decoding_debug: Whether to enable constrained decoding debug
-        audio_format: Output audio format, one of "mp3", "wav", "flac". Default: "flac"
+        audio_format: Output audio format, one of "mp3", "wav", "flac", "wav32", "opus", "aac". Default: "flac"
     """
     batch_size: int = 2
     allow_lm_batch: bool = False
@@ -591,12 +592,15 @@ def generate_music(
             reference_audio=params.reference_audio,
             audio_duration=audio_duration,
             batch_size=config.batch_size if config.batch_size is not None else 1,
-            src_audio=params.src_audio,
+            # text2music (Custom mode) never uses src_audio; force None to
+            # prevent stale UI values from leaking into generation.
+            src_audio=None if params.task_type == "text2music" else params.src_audio,
             audio_code_string=audio_code_string_to_use,
             repainting_start=params.repainting_start,
             repainting_end=params.repainting_end,
             instruction=params.instruction,
             audio_cover_strength=params.audio_cover_strength,
+            cover_noise_strength=params.cover_noise_strength,
             task_type=params.task_type,
             use_adg=params.use_adg,
             cfg_interval_start=params.cfg_interval_start,
@@ -649,9 +653,18 @@ def generate_music(
             # Update audio-specific values
             audio_params["seed"] = seed_list[idx] if idx < len(seed_list) else None
 
-            # Add audio codes if batch mode
+            # Add LM-generated audio codes (only if non-empty, to preserve
+            # user-provided codes when LM was used only for CoT metas)
             if lm_generated_audio_codes_list and idx < len(lm_generated_audio_codes_list):
-                audio_params["audio_codes"] = lm_generated_audio_codes_list[idx]
+                lm_code = lm_generated_audio_codes_list[idx]
+                if lm_code and str(lm_code).strip():
+                    audio_params["audio_codes"] = lm_code
+
+            # Add LoRA state to params for UUID generation (ensures different UUIDs when only LoRA state changes)
+            audio_params["lora_loaded"] = dit_handler.lora_loaded
+            audio_params["use_lora"] = dit_handler.use_lora
+            audio_params["lora_scale"] = dit_handler.lora_scale
+            audio_params["lora_weights_hash"] = get_lora_weights_hash(dit_handler)
 
             # Get audio tensor and metadata
             audio_tensor = dit_audio.get("tensor")

@@ -71,10 +71,10 @@ class AudioSaver:
         Initialize audio saver
         
         Args:
-            default_format: Default save format ('flac', 'wav', 'mp3', 'wav32')
+            default_format: Default save format ('flac', 'wav', 'mp3', 'wav32', 'opus', 'aac')
         """
         self.default_format = default_format.lower()
-        if self.default_format not in ["flac", "wav", "mp3", "wav32"]:
+        if self.default_format not in ["flac", "wav", "mp3", "wav32", "opus", "aac"]:
             logger.warning(f"Unsupported format {default_format}, using 'flac'")
             self.default_format = "flac"
     
@@ -93,14 +93,14 @@ class AudioSaver:
             audio_data: Audio data, torch.Tensor [channels, samples] or numpy.ndarray
             output_path: Output file path (extension can be omitted)
             sample_rate: Sample rate
-            format: Audio format ('flac', 'wav', 'mp3', 'wav32'), defaults to default_format
+            format: Audio format ('flac', 'wav', 'mp3', 'wav32', 'opus', 'aac'), defaults to default_format
             channels_first: If True, tensor format is [channels, samples], else [samples, channels]
         
         Returns:
             Actual saved file path
         """
         format = (format or self.default_format).lower()
-        if format not in ["flac", "wav", "mp3", "wav32"]:
+        if format not in ["flac", "wav", "mp3", "wav32", "opus", "aac"]:
             logger.warning(f"Unsupported format {format}, using {self.default_format}")
             format = self.default_format
         
@@ -110,11 +110,14 @@ class AudioSaver:
         # Determine extension based on format
         ext = ".wav" if format == "wav32" else f".{format}"
         
-        if output_path.suffix.lower() not in ['.flac', '.wav', '.mp3']:
+        if output_path.suffix.lower() not in ['.flac', '.wav', '.mp3', '.opus', '.aac', '.m4a']:
             output_path = output_path.with_suffix(ext)
         elif format == "wav32" and output_path.suffix.lower() == ".wav32":
              # Explicitly fix .wav32 extension if present
              output_path = output_path.with_suffix(".wav")
+        elif format == "aac" and output_path.suffix.lower() == ".m4a":
+             # Allow .m4a as valid extension for AAC (it's a container format for AAC)
+             pass
         
         # Convert to torch tensor
         if isinstance(audio_data, np.ndarray):
@@ -140,8 +143,8 @@ class AudioSaver:
         
         # Select backend and save
         try:
-            if format == "mp3":
-                # MP3 uses ffmpeg backend
+            if format in ["mp3", "opus", "aac"]:
+                # MP3, Opus, and AAC use ffmpeg backend
                 torchaudio.save(
                     str(output_path),
                     audio_tensor,
@@ -220,7 +223,7 @@ class AudioSaver:
         Args:
             input_path: Input audio file path
             output_path: Output audio file path
-            output_format: Target format ('flac', 'wav', 'mp3')
+            output_format: Target format ('flac', 'wav', 'mp3', 'wav32', 'opus', 'aac')
             remove_input: Whether to delete input file
         
         Returns:
@@ -299,6 +302,66 @@ class AudioSaver:
             saved_paths.append(saved_path)
         
         return saved_paths
+
+
+def get_lora_weights_hash(dit_handler) -> str:
+    """Compute an MD5 hash identifying the currently loaded LoRA adapter weights.
+
+    Iterates over the handler's LoRA service registry to find adapter weight
+    file paths, then hashes each file to produce a combined fingerprint.
+
+    Args:
+        dit_handler: DiT handler instance with LoRA state attributes.
+
+    Returns:
+        Hex digest string uniquely identifying the loaded LoRA weights,
+        or empty string if no LoRA is active.
+    """
+    if not getattr(dit_handler, "lora_loaded", False):
+        return ""
+    if not getattr(dit_handler, "use_lora", False):
+        return ""
+
+    lora_service = getattr(dit_handler, "_lora_service", None)
+    if lora_service is None or not lora_service.registry:
+        return ""
+
+    hash_obj = hashlib.sha256()
+    found_any = False
+
+    for adapter_name in sorted(lora_service.registry.keys()):
+        meta = lora_service.registry[adapter_name]
+        lora_path = meta.get("path")
+        if not lora_path:
+            continue
+
+        # Try common weight file names at lora_path
+        candidates = []
+        if os.path.isfile(lora_path):
+            candidates.append(lora_path)
+        elif os.path.isdir(lora_path):
+            for fname in (
+                "adapter_model.safetensors",
+                "adapter_model.bin",
+                "lokr_weights.safetensors",
+            ):
+                fpath = os.path.join(lora_path, fname)
+                if os.path.isfile(fpath):
+                    candidates.append(fpath)
+
+        for fpath in candidates:
+            try:
+                with open(fpath, "rb") as f:
+                    while True:
+                        chunk = f.read(1 << 20)  # 1 MB chunks
+                        if not chunk:
+                            break
+                        hash_obj.update(chunk)
+                found_any = True
+            except OSError:
+                continue
+
+    return hash_obj.hexdigest() if found_any else ""
 
 
 def get_audio_file_hash(audio_file) -> str:
