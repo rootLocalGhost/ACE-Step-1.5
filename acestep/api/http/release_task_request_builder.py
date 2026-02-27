@@ -36,7 +36,7 @@ def build_generate_music_request(
     if track_classes is not None and isinstance(track_classes, str):
         track_classes = [track_classes]
 
-    return request_model_cls(
+    payload = dict(
         prompt=parser.str("prompt"),
         lyrics=parser.str("lyrics"),
         thinking=parser.bool("thinking"),
@@ -86,5 +86,6 @@ def build_generate_music_request(
         allow_lm_batch=parser.bool("allow_lm_batch", True),
         track_name=parser.str("track_name"),
         track_classes=track_classes,
-        **overrides,
     )
+    payload.update(overrides)
+    return request_model_cls(**payload)

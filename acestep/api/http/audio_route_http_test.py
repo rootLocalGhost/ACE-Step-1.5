@@ -39,7 +39,7 @@ class AudioRouteHttpTests(unittest.TestCase):
         app.state.temp_audio_dir = str(Path.cwd())
         register_audio_route(app=app, verify_api_key=_verify_api_key)
         client = TestClient(app)
-        with mock.patch("acestep.api.http.audio_route.os.path.exists", return_value=True), mock.patch(
+        with mock.patch("acestep.api.http.audio_route.Path.is_file", return_value=True), mock.patch(
             "fastapi.responses.FileResponse",
             return_value=Response(content=b"fake-audio", media_type="audio/mpeg"),
         ):

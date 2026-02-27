@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -20,18 +20,20 @@ def register_audio_route(
 
         from fastapi.responses import FileResponse
 
-        resolved_path = os.path.realpath(path)
-        allowed_dir = os.path.realpath(request.app.state.temp_audio_dir)
-        if not resolved_path.startswith(allowed_dir + os.sep) and resolved_path != allowed_dir:
+        resolved_path = Path(path).resolve(strict=False)
+        allowed_dir = Path(request.app.state.temp_audio_dir).resolve(strict=False)
+        try:
+            resolved_path.relative_to(allowed_dir)
+        except ValueError:
             raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
-        if not os.path.exists(resolved_path):
+        if not resolved_path.is_file():
             raise HTTPException(status_code=404, detail="Audio file not found")
 
-        ext = os.path.splitext(resolved_path)[1].lower()
+        ext = resolved_path.suffix.lower()
         media_types = {
             ".mp3": "audio/mpeg",
             ".wav": "audio/wav",
             ".flac": "audio/flac",
             ".ogg": "audio/ogg",
         }
-        return FileResponse(resolved_path, media_type=media_types.get(ext, "audio/mpeg"))
+        return FileResponse(str(resolved_path), media_type=media_types.get(ext, "audio/mpeg"))

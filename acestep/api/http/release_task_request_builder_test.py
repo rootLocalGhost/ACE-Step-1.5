@@ -95,6 +95,24 @@ class ReleaseTaskRequestBuilderTests(unittest.TestCase):
         self.assertEqual("override-ref.wav", request.reference_audio_path)
         self.assertEqual("override-src.wav", request.src_audio_path)
 
+    def test_build_request_allows_generic_overrides_without_kwarg_collision(self):
+        """Builder should allow overrides for any field without duplicate-kwarg errors."""
+
+        parser = _FakeParser({"prompt": "from-parser", "lyrics": "from-parser"})
+        request = build_generate_music_request(
+            parser=parser,
+            request_model_cls=lambda **kwargs: SimpleNamespace(**kwargs),
+            default_dit_instruction="default-instruction",
+            lm_default_temperature=0.85,
+            lm_default_cfg_scale=2.5,
+            lm_default_top_p=0.9,
+            prompt="from-override",
+            lyrics="override-lyrics",
+        )
+
+        self.assertEqual("from-override", request.prompt)
+        self.assertEqual("override-lyrics", request.lyrics)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,17 +32,33 @@ class AudioRouteTests(unittest.TestCase):
         """Audio route should return HTTP 403 for paths outside allowed directory."""
 
         app = FastAPI()
-        app.state.temp_audio_dir = str(Path.cwd())
+        allowed_dir = Path.cwd() / "__allowed_audio_dir__"
+        app.state.temp_audio_dir = str(allowed_dir)
+        register_audio_route(app=app, verify_api_key=_verify_api_key)
+        endpoint = _get_endpoint(app, "/v1/audio", "GET")
+        request = type("Req", (), {"app": app})()
+        outside_path = Path.cwd() / "__outside_audio__.mp3"
+
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(endpoint(path=str(outside_path), request=request, _=None))
+        self.assertEqual(403, ctx.exception.status_code)
+
+    def test_returns_404_when_file_missing(self):
+        """Audio route should return HTTP 404 for missing files inside allowed dir."""
+
+        app = FastAPI()
+        allowed_dir = Path.cwd() / "__allowed_audio_dir__"
+        app.state.temp_audio_dir = str(allowed_dir)
         register_audio_route(app=app, verify_api_key=_verify_api_key)
         endpoint = _get_endpoint(app, "/v1/audio", "GET")
         request = type("Req", (), {"app": app})()
 
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(endpoint(path=str(Path("C:/outside.mp3")), request=request, _=None))
-        self.assertEqual(403, ctx.exception.status_code)
+            asyncio.run(endpoint(path=str(allowed_dir / "missing.mp3"), request=request, _=None))
+        self.assertEqual(404, ctx.exception.status_code)
 
-    def test_returns_404_when_file_missing(self):
-        """Audio route should return HTTP 404 for missing files inside allowed dir."""
+    def test_returns_404_for_directory_target(self):
+        """Audio route should return HTTP 404 when target path is a directory."""
 
         app = FastAPI()
         app.state.temp_audio_dir = str(Path.cwd())
@@ -51,7 +67,7 @@ class AudioRouteTests(unittest.TestCase):
         request = type("Req", (), {"app": app})()
 
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(endpoint(path=str(Path.cwd() / "missing.mp3"), request=request, _=None))
+            asyncio.run(endpoint(path=str(Path.cwd()), request=request, _=None))
         self.assertEqual(404, ctx.exception.status_code)
 
 
