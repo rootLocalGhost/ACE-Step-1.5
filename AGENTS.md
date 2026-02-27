@@ -150,6 +150,21 @@ def inject_lora_into_dit(
 - Gate WIP or unstable UI/API paths behind explicit feature/release flags.
 - Keep default behavior stable; "coming soon" paths must not appear as usable functionality unless they are operational and tested.
 
+## Python Coding Best Practices
+
+- Use explicit, readable code over clever shortcuts.
+- Docstrings are mandatory for all new or modified Python modules, classes, and functions.
+- Docstrings must be concise and include purpose plus key inputs/outputs (and raised exceptions when relevant).
+- Add type hints for new/modified functions when practical.
+- Keep functions focused and short; extract helpers instead of nesting complexity.
+- Use clear names that describe behavior, not implementation trivia.
+- Prefer pure functions for logic-heavy paths where possible.
+- Avoid duplicated logic, but do not introduce broad abstractions too early; prefer simple local duplication over unstable premature abstraction.
+- Handle errors explicitly; avoid bare `except`.
+- Keep logging actionable; avoid noisy logs and `print` debugging in committed code.
+- Avoid hidden state and unintended side effects.
+- Write comments only where intent is non-obvious; keep comments concise and technical.
+
 ## AI-Agent Workflow (Recommended)
 
 1. Understand the task and define explicit in-scope/out-of-scope boundaries.
