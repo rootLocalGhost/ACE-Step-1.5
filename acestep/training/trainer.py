@@ -40,10 +40,8 @@ except ImportError:
     logger.warning("bitsandbytes not installed. Using standard AdamW.")
 
 from acestep.training.configs import LoRAConfig, LoKRConfig, TrainingConfig
-from acestep.training.lora_injection import (
-    inject_lora_into_dit,
-    check_peft_available,
-)
+from acestep.training.lora_injection import inject_lora_into_dit
+from acestep.training.lora_utils import check_peft_available
 from acestep.training.lora_checkpoint import (
     save_lora_weights,
     save_training_checkpoint,
@@ -1094,11 +1092,6 @@ class LoRATrainer:
                     training_state["plot_loss"].append(avg_epoch_loss)
                     training_state["plot_ema"].append(ema_loss)
             self.fabric.log("train/epoch_loss", avg_epoch_loss, step=epoch + 1)
-            yield (
-                global_step,
-                avg_epoch_loss,
-                "💾 Checkpoint saved at epoch {epoch + 1}",
-            )
 
             # Validation and best checkpoint (if validation set exists)
             if val_loader is not None:
