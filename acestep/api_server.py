@@ -28,11 +28,9 @@ import urllib.parse
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Literal, Optional, Union
-from uuid import uuid4
 from loguru import logger
 import torch
 
@@ -49,6 +47,18 @@ from acestep.api.train_api_service import (
     initialize_training_state,
     register_training_api_routes,
 )
+from acestep.api.jobs.models import (
+    CreateJobResponse,
+    JobResponse,
+    JobResult,
+    JobStatus,
+)
+from acestep.api.jobs.store import (
+    _JobStore,
+    _append_jsonl,
+    _atomic_write_json,
+)
+from acestep.api.http.lora_routes import register_lora_routes
 
 from acestep.handler import AceStepHandler
 from acestep.llm_inference import LLMHandler
@@ -451,9 +461,6 @@ def _parse_description_hints(description: str) -> tuple[Optional[str], bool]:
     return detected_language, is_instrumental
 
 
-JobStatus = Literal["queued", "running", "succeeded", "failed"]
-
-
 class GenerateMusicRequest(BaseModel):
     prompt: str = Field(default="", description="Text prompt describing the music")
     lyrics: str = Field(default="", description="Lyric text")
@@ -538,20 +545,6 @@ class GenerateMusicRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True
         allow_population_by_alias = True
-
-
-class LoadLoRARequest(BaseModel):
-    lora_path: str = Field(..., description="Path to LoRA adapter directory or LoKr/LyCORIS safetensors file")
-    adapter_name: Optional[str] = Field(default=None, description="Optional adapter name (uses path-derived name if omitted)")
-
-
-class SetLoRAScaleRequest(BaseModel):
-    adapter_name: Optional[str] = Field(default=None, description="Optional adapter name; defaults to active adapter")
-    scale: float = Field(..., ge=0.0, le=1.0, description="LoRA scale (0.0-1.0)")
-
-
-class ToggleLoRARequest(BaseModel):
-    use_lora: bool = Field(..., description="Enable or disable LoRA")
 
 
 class InitModelRequest(BaseModel):
@@ -721,232 +714,6 @@ def _temporary_llm_model(app: FastAPI, llm: "LLMHandler", lm_model_path: Optiona
                     app.state._llm_init_error = str(e)
                 except Exception:
                     pass
-
-
-def _atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
-    """Write JSON atomically to reduce corruption risk during incremental saves."""
-
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=directory or None)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
-        raise
-
-
-def _append_jsonl(path: str, record: Dict[str, Any]) -> None:
-    """Append a single JSONL record for audit/progress tracing."""
-
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-class CreateJobResponse(BaseModel):
-    task_id: str
-    status: JobStatus
-    queue_position: int = 0  # 1-based best-effort position when queued
-    progress_text: Optional[str] = ""
-
-
-class JobResult(BaseModel):
-    first_audio_path: Optional[str] = None
-    second_audio_path: Optional[str] = None
-    audio_paths: list[str] = Field(default_factory=list)
-
-    generation_info: str = ""
-    status_message: str = ""
-    seed_value: str = ""
-
-    metas: Dict[str, Any] = Field(default_factory=dict)
-    bpm: Optional[int] = None
-    duration: Optional[float] = None
-    genres: Optional[str] = None
-    keyscale: Optional[str] = None
-    timesignature: Optional[str] = None
-
-    # Model information
-    lm_model: Optional[str] = None
-    dit_model: Optional[str] = None
-
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: JobStatus
-    created_at: float
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
-
-    # queue observability
-    queue_position: int = 0
-    eta_seconds: Optional[float] = None
-    avg_job_seconds: Optional[float] = None
-
-    result: Optional[JobResult] = None
-    error: Optional[str] = None
-
-
-@dataclass
-class _JobRecord:
-    job_id: str
-    status: JobStatus
-    created_at: float
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    progress_text: str = ""
-    status_text: str = ""
-    env: str = "development"
-    progress: float = 0.0  # 0.0 - 1.0
-    stage: str = "queued"
-    updated_at: Optional[float] = None
-    # OpenRouter integration: synchronous wait / streaming support
-    done_event: Optional[asyncio.Event] = None
-    progress_queue: Optional[asyncio.Queue] = None
-
-
-class _JobStore:
-    def __init__(self, max_age_seconds: int = JOB_STORE_MAX_AGE_SECONDS) -> None:
-        self._lock = Lock()
-        self._jobs: Dict[str, _JobRecord] = {}
-        self._max_age = max_age_seconds
-
-    def create(self) -> _JobRecord:
-        job_id = str(uuid4())
-        now = time.time()
-        rec = _JobRecord(job_id=job_id, status="queued", created_at=now, progress=0.0, stage="queued", updated_at=now)
-        with self._lock:
-            self._jobs[job_id] = rec
-        return rec
-
-    def create_with_id(self, job_id: str, env: str = "development") -> _JobRecord:
-        """Create job record with specified ID"""
-        now = time.time()
-        rec = _JobRecord(
-            job_id=job_id,
-            status="queued",
-            created_at=now,
-            env=env,
-            progress=0.0,
-            stage="queued",
-            updated_at=now,
-        )
-        with self._lock:
-            self._jobs[job_id] = rec
-        return rec
-
-    def get(self, job_id: str) -> Optional[_JobRecord]:
-        with self._lock:
-            return self._jobs.get(job_id)
-
-    def mark_running(self, job_id: str) -> None:
-        with self._lock:
-            rec = self._jobs[job_id]
-            rec.status = "running"
-            rec.started_at = time.time()
-            rec.progress = max(rec.progress, 0.01)
-            rec.stage = "running"
-            rec.updated_at = time.time()
-
-    def mark_succeeded(self, job_id: str, result: Dict[str, Any]) -> None:
-        with self._lock:
-            rec = self._jobs[job_id]
-            rec.status = "succeeded"
-            rec.finished_at = time.time()
-            rec.result = result
-            rec.error = None
-            rec.progress = 1.0
-            rec.stage = "succeeded"
-            rec.updated_at = time.time()
-
-    def mark_failed(self, job_id: str, error: str) -> None:
-        with self._lock:
-            rec = self._jobs[job_id]
-            rec.status = "failed"
-            rec.finished_at = time.time()
-            rec.result = None
-            rec.error = error
-            rec.progress = rec.progress if rec.progress > 0 else 0.0
-            rec.stage = "failed"
-            rec.updated_at = time.time()
-
-    def update_progress(self, job_id: str, progress: float, stage: Optional[str] = None) -> None:
-        with self._lock:
-            rec = self._jobs.get(job_id)
-            if not rec:
-                return
-            rec.progress = max(0.0, min(1.0, float(progress)))
-            if stage:
-                rec.stage = stage
-            rec.updated_at = time.time()
-
-    def cleanup_old_jobs(self, max_age_seconds: Optional[int] = None) -> int:
-        """
-        Clean up completed jobs older than max_age_seconds.
-
-        Only removes jobs with status 'succeeded' or 'failed'.
-        Jobs that are 'queued' or 'running' are never removed.
-
-        Returns the number of jobs removed.
-        """
-        max_age = max_age_seconds if max_age_seconds is not None else self._max_age
-        now = time.time()
-        removed = 0
-
-        with self._lock:
-            to_remove = []
-            for job_id, rec in self._jobs.items():
-                if rec.status in ("succeeded", "failed"):
-                    finish_time = rec.finished_at or rec.created_at
-                    age = now - finish_time
-                    if age > max_age:
-                        to_remove.append(job_id)
-
-            for job_id in to_remove:
-                del self._jobs[job_id]
-                removed += 1
-
-        return removed
-
-    def get_stats(self) -> Dict[str, int]:
-        """Get statistics about jobs in the store."""
-        with self._lock:
-            stats = {
-                "total": len(self._jobs),
-                "queued": 0,
-                "running": 0,
-                "succeeded": 0,
-                "failed": 0,
-            }
-            for rec in self._jobs.values():
-                if rec.status in stats:
-                    stats[rec.status] += 1
-            return stats
-
-    def update_status_text(self, job_id: str, text: str) -> None:
-        with self._lock:
-            if job_id in self._jobs:
-                self._jobs[job_id].status_text = text
-
-    def update_progress_text(self, job_id: str, text: str) -> None:
-        with self._lock:
-            if job_id in self._jobs:
-                self._jobs[job_id].progress_text = text
-
 def _env_bool(name: str, default: bool) -> bool:
     v = os.getenv(name)
     if v is None:
@@ -3183,117 +2950,11 @@ def create_app() -> FastAPI:
         except Exception as e:
             return _wrap_response(None, code=500, error=f"format_sample error: {str(e)}")
 
-    @app.post("/v1/lora/load")
-    async def load_lora_endpoint(request: LoadLoRARequest, _: None = Depends(verify_api_key)):
-        """Load LoRA adapter into the primary model."""
-        handler: AceStepHandler = app.state.handler
-
-        if handler is None or handler.model is None:
-            raise HTTPException(status_code=500, detail="Model not initialized")
-
-        try:
-            adapter_name = request.adapter_name.strip() if isinstance(request.adapter_name, str) else None
-            if adapter_name:
-                result = handler.add_lora(request.lora_path, adapter_name=adapter_name)
-            else:
-                result = handler.load_lora(request.lora_path)
-
-            if result.startswith("✅"):
-                response_data = {"message": result, "lora_path": request.lora_path}
-                if adapter_name:
-                    response_data["adapter_name"] = adapter_name
-                return _wrap_response(response_data)
-            else:
-                raise HTTPException(status_code=400, detail=result)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load LoRA: {str(e)}")
-
-    @app.post("/v1/lora/unload")
-    async def unload_lora_endpoint(_: None = Depends(verify_api_key)):
-        """Unload LoRA adapter and restore base model."""
-        handler: AceStepHandler = app.state.handler
-
-        if handler is None or handler.model is None:
-            raise HTTPException(status_code=500, detail="Model not initialized")
-
-        try:
-            result = handler.unload_lora()
-
-            if result.startswith("✅") or result.startswith("⚠️"):
-                return _wrap_response({"message": result})
-            else:
-                raise HTTPException(status_code=400, detail=result)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to unload LoRA: {str(e)}")
-
-    @app.post("/v1/lora/toggle")
-    async def toggle_lora_endpoint(request: ToggleLoRARequest, _: None = Depends(verify_api_key)):
-        """Enable or disable LoRA adapter for inference."""
-        handler: AceStepHandler = app.state.handler
-
-        if handler is None or handler.model is None:
-            raise HTTPException(status_code=500, detail="Model not initialized")
-
-        try:
-            result = handler.set_use_lora(request.use_lora)
-
-            if result.startswith("✅"):
-                return _wrap_response({"message": result, "use_lora": request.use_lora})
-            else:
-                return _wrap_response(None, code=400, error=result)
-        except Exception as e:
-            return _wrap_response(None, code=500, error=f"Failed to toggle LoRA: {str(e)}")
-
-    @app.post("/v1/lora/scale")
-    async def set_lora_scale_endpoint(request: SetLoRAScaleRequest, _: None = Depends(verify_api_key)):
-        """Set LoRA adapter scale/strength (0.0-1.0)."""
-        handler: AceStepHandler = app.state.handler
-
-        if handler is None or handler.model is None:
-            raise HTTPException(status_code=500, detail="Model not initialized")
-
-        try:
-            adapter_name = request.adapter_name.strip() if isinstance(request.adapter_name, str) else None
-            if adapter_name:
-                result = handler.set_lora_scale(adapter_name, request.scale)
-            else:
-                result = handler.set_lora_scale(request.scale)
-
-            if result.startswith("✅") or result.startswith("⚠️"):
-                response_data = {"message": result, "scale": request.scale}
-                if adapter_name:
-                    response_data["adapter_name"] = adapter_name
-                return _wrap_response(response_data)
-            else:
-                return _wrap_response(None, code=400, error=result)
-        except Exception as e:
-            return _wrap_response(None, code=500, error=f"Failed to set LoRA scale: {str(e)}")
-
-    @app.get("/v1/lora/status")
-    async def get_lora_status_endpoint(_: None = Depends(verify_api_key)):
-        """Get current LoRA/LoKr adapter state for the primary handler."""
-        handler: AceStepHandler = app.state.handler
-
-        if handler is None or handler.model is None:
-            raise HTTPException(status_code=500, detail="Model not initialized")
-
-        status = handler.get_lora_status()
-        return _wrap_response({
-            # Legacy fields for existing clients
-            "lora_loaded": bool(status.get("loaded", getattr(handler, "lora_loaded", False))),
-            "use_lora": bool(status.get("active", getattr(handler, "use_lora", False))),
-            "lora_scale": float(status.get("scale", getattr(handler, "lora_scale", 1.0))),
-            "adapter_type": getattr(handler, "_adapter_type", None),
-            # Extended fields from refactored LoRA service
-            "scales": status.get("scales", {}),
-            "active_adapter": status.get("active_adapter"),
-            "adapters": status.get("adapters", []),
-            "synthetic_default_mode": bool(status.get("synthetic_default_mode", False)),
-        })
+    register_lora_routes(
+        app=app,
+        verify_api_key=verify_api_key,
+        wrap_response=_wrap_response,
+    )
 
     @app.post("/v1/reinitialize")
     async def reinitialize_service(_: None = Depends(verify_api_key)):
@@ -3511,3 +3172,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
