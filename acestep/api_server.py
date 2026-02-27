@@ -19,7 +19,6 @@ import asyncio
 import glob
 import json
 import os
-import random
 import sys
 import time
 import traceback
@@ -61,6 +60,8 @@ from acestep.api.jobs.store import (
 from acestep.api.http.lora_routes import register_lora_routes
 from acestep.api.http.model_service_routes import register_model_service_routes
 from acestep.api.http.reinitialize_route import register_reinitialize_route
+from acestep.api.http.sample_format_routes import register_sample_format_routes
+from acestep.api.http.audio_route import register_audio_route
 
 from acestep.handler import AceStepHandler
 from acestep.llm_inference import LLMHandler
@@ -2584,166 +2585,20 @@ def create_app() -> FastAPI:
         env_bool=_env_bool,
     )
 
-    @app.post("/create_random_sample")
-    async def create_random_sample_endpoint(request: Request, authorization: Optional[str] = Header(None)):
-        """
-        Get random sample parameters from pre-loaded example data.
-
-        Returns a random example from the examples directory for form filling.
-        """
-        content_type = (request.headers.get("content-type") or "").lower()
-
-        if "json" in content_type:
-            body = await request.json()
-        else:
-            form = await request.form()
-            body = {k: v for k, v in form.items()}
-
-        verify_token_from_request(body, authorization)
-        sample_type = body.get("sample_type", "simple_mode") or "simple_mode"
-
-        if sample_type == "simple_mode":
-            example_data = SIMPLE_EXAMPLE_DATA
-        else:
-            example_data = CUSTOM_EXAMPLE_DATA
-
-        if not example_data:
-            return _wrap_response(None, code=500, error="No example data available")
-
-        random_example = random.choice(example_data)
-        return _wrap_response(random_example)
-
-    @app.post("/format_input")
-    async def format_input_endpoint(request: Request, authorization: Optional[str] = Header(None)):
-        """
-        Format and enhance lyrics/caption via LLM.
-
-        Takes user-provided caption and lyrics, and uses the LLM to enhance them
-        with proper structure and metadata.
-        """
-        content_type = (request.headers.get("content-type") or "").lower()
-
-        if "json" in content_type:
-            body = await request.json()
-        else:
-            form = await request.form()
-            body = {k: v for k, v in form.items()}
-
-        verify_token_from_request(body, authorization)
-        llm: LLMHandler = app.state.llm_handler
-
-        # Initialize LLM if needed
-        with app.state._llm_init_lock:
-            if not getattr(app.state, "_llm_initialized", False):
-                if getattr(app.state, "_llm_init_error", None):
-                    raise HTTPException(status_code=500, detail=f"LLM init failed: {app.state._llm_init_error}")
-
-                # Check if lazy loading is disabled
-                if getattr(app.state, "_llm_lazy_load_disabled", False):
-                    raise HTTPException(
-                        status_code=503,
-                        detail="LLM not initialized. Set ACESTEP_INIT_LLM=true in .env to enable."
-                    )
-
-                project_root = _get_project_root()
-                checkpoint_dir = os.path.join(project_root, "checkpoints")
-                lm_model_path = os.getenv("ACESTEP_LM_MODEL_PATH", "acestep-5Hz-lm-0.6B").strip()
-                backend = os.getenv("ACESTEP_LM_BACKEND", "vllm").strip().lower()
-                if backend not in {"vllm", "pt", "mlx"}:
-                    backend = "vllm"
-
-                # Auto-download LM model if not present
-                lm_model_name = _get_model_name(lm_model_path)
-                if lm_model_name:
-                    try:
-                        _ensure_model_downloaded(lm_model_name, checkpoint_dir)
-                    except Exception as e:
-                        print(f"[API Server] Warning: Failed to download LM model {lm_model_name}: {e}")
-
-                lm_device = os.getenv("ACESTEP_LM_DEVICE", os.getenv("ACESTEP_DEVICE", "auto"))
-                lm_offload = _env_bool("ACESTEP_LM_OFFLOAD_TO_CPU", False)
-                status, ok = llm.initialize(
-                    checkpoint_dir=checkpoint_dir,
-                    lm_model_path=lm_model_path,
-                    backend=backend,
-                    device=lm_device,
-                    offload_to_cpu=lm_offload,
-                    dtype=None,
-                )
-                if not ok:
-                    app.state._llm_init_error = status
-                    raise HTTPException(status_code=500, detail=f"LLM init failed: {status}")
-                app.state._llm_initialized = True
-
-        # Parse parameters
-        prompt = body.get("prompt", "") or ""
-        lyrics = body.get("lyrics", "") or ""
-        temperature = _to_float(body.get("temperature"), 0.85)
-
-        # Parse param_obj if provided
-        param_obj_str = body.get("param_obj", "{}")
-        if isinstance(param_obj_str, dict):
-            param_obj = param_obj_str
-        else:
-            try:
-                param_obj = json.loads(param_obj_str) if param_obj_str else {}
-            except json.JSONDecodeError:
-                param_obj = {}
-
-        # Extract metadata from param_obj
-        duration = _to_float(param_obj.get("duration"))
-        bpm = _to_int(param_obj.get("bpm"))
-        key_scale = param_obj.get("key", "") or param_obj.get("key_scale", "") or ""
-        time_signature = param_obj.get("time_signature", "") or body.get("time_signature", "") or ""
-        language = param_obj.get("language", "") or ""
-
-        # Build user_metadata for format_sample
-        user_metadata_for_format = {}
-        if bpm is not None:
-            user_metadata_for_format['bpm'] = bpm
-        if duration is not None and duration > 0:
-            user_metadata_for_format['duration'] = int(duration)
-        if key_scale:
-            user_metadata_for_format['keyscale'] = key_scale
-        if time_signature:
-            user_metadata_for_format['timesignature'] = time_signature
-        if language and language != "unknown":
-            user_metadata_for_format['language'] = language
-
-        # Call format_sample
-        try:
-            format_result = format_sample(
-                llm_handler=llm,
-                caption=prompt,
-                lyrics=lyrics,
-                user_metadata=user_metadata_for_format if user_metadata_for_format else None,
-                temperature=temperature,
-                use_constrained_decoding=True,
-            )
-
-            if not format_result.success:
-                error_msg = format_result.error or format_result.status_message
-                return _wrap_response(None, code=500, error=f"format_sample failed: {error_msg}")
-
-            # Use formatted results or fallback to original
-            result_caption = format_result.caption or prompt
-            result_lyrics = format_result.lyrics or lyrics
-            result_duration = format_result.duration or duration
-            result_bpm = format_result.bpm or bpm
-            result_key_scale = format_result.keyscale or key_scale
-            result_time_signature = format_result.timesignature or time_signature
-
-            return _wrap_response({
-                "caption": result_caption,
-                "lyrics": result_lyrics,
-                "bpm": result_bpm,
-                "key_scale": result_key_scale,
-                "time_signature": result_time_signature,
-                "duration": result_duration,
-                "vocal_language": format_result.language or language or "unknown",
-            })
-        except Exception as e:
-            return _wrap_response(None, code=500, error=f"format_sample error: {str(e)}")
+    register_sample_format_routes(
+        app=app,
+        verify_token_from_request=verify_token_from_request,
+        wrap_response=_wrap_response,
+        simple_example_data=SIMPLE_EXAMPLE_DATA,
+        custom_example_data=CUSTOM_EXAMPLE_DATA,
+        format_sample=format_sample,
+        get_project_root=_get_project_root,
+        get_model_name=_get_model_name,
+        ensure_model_downloaded=_ensure_model_downloaded,
+        env_bool=_env_bool,
+        to_int=_to_int,
+        to_float=_to_float,
+    )
 
     register_lora_routes(
         app=app,
@@ -2770,29 +2625,10 @@ def create_app() -> FastAPI:
         append_jsonl=_append_jsonl,
     )
 
-    @app.get("/v1/audio")
-    async def get_audio(path: str, request: Request, _: None = Depends(verify_api_key)):
-        """Serve audio file by path."""
-        from fastapi.responses import FileResponse
-
-        # Security: Validate path is within allowed directory to prevent path traversal
-        resolved_path = os.path.realpath(path)
-        allowed_dir = os.path.realpath(request.app.state.temp_audio_dir)
-        if not resolved_path.startswith(allowed_dir + os.sep) and resolved_path != allowed_dir:
-            raise HTTPException(status_code=403, detail="Access denied: path outside allowed directory")
-        if not os.path.exists(resolved_path):
-            raise HTTPException(status_code=404, detail="Audio file not found")
-
-        ext = os.path.splitext(resolved_path)[1].lower()
-        media_types = {
-            ".mp3": "audio/mpeg",
-            ".wav": "audio/wav",
-            ".flac": "audio/flac",
-            ".ogg": "audio/ogg",
-        }
-        media_type = media_types.get(ext, "audio/mpeg")
-
-        return FileResponse(resolved_path, media_type=media_type)
+    register_audio_route(
+        app=app,
+        verify_api_key=verify_api_key,
+    )
 
     return app
 
