@@ -50,6 +50,7 @@ def generate_with_batch_management(
     progress=gr.Progress(track_tqdm=True),
 ):
     """Wrap ``generate_with_progress`` with batch queue management state."""
+    _ = generation_params_state  # reserved for API compatibility with wiring/state outputs
     generator = generate_with_progress(
         dit_handler, llm_handler,
         captions, lyrics, bpm, key_scale, time_signature, vocal_language,
