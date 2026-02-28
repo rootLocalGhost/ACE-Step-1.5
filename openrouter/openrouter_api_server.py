@@ -229,20 +229,6 @@ class ModelsResponse(BaseModel):
     data: List[ModelInfo]
 
 
-class SampleRequest(BaseModel):
-    """Request model for /v1/sample endpoint."""
-    query: str
-    instrumental: bool = False
-    vocal_language: str = "en"
-    temperature: float = 0.85
-
-
-class Audio2CodeRequest(BaseModel):
-    """Request model for /v1/audio2code endpoint."""
-    src_audio_b64: str
-    src_audio_format: str = "wav"
-
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -831,6 +817,19 @@ def create_app() -> FastAPI:
             task_instruction = TASK_INSTRUCTIONS.get(request.task_type, TASK_INSTRUCTIONS["text2music"])
 
             no_lm_task = request.task_type in ("cover", "repaint")
+
+            # Auto-convert src_audio to codes for cover mode when no codes provided
+            resolved_audio_codes = request.audio_codes
+            if (src_audio_path and not resolved_audio_codes
+                    and request.task_type == "cover"):
+                try:
+                    codes_str = h.convert_src_audio_to_codes(src_audio_path)
+                    if codes_str and not codes_str.startswith("❌"):
+                        resolved_audio_codes = codes_str
+                        print(f"[OpenRouter API] Auto-converted src_audio to {len(codes_str)} chars of audio codes")
+                except Exception as e:
+                    print(f"[OpenRouter API] Warning: auto audio2code failed: {e}")
+
             resolved_thinking = False if no_lm_task else request.thinking
             resolved_cot_caption = False if no_lm_task else request.use_cot_caption
             resolved_cot_language = False if no_lm_task else request.use_cot_language
@@ -844,7 +843,7 @@ def create_app() -> FastAPI:
                 instruction=task_instruction,
                 reference_audio=reference_audio_path,
                 src_audio=src_audio_path,
-                audio_codes=request.audio_codes,
+                audio_codes=resolved_audio_codes,
                 caption=gen_prompt,
                 lyrics=gen_lyrics,
                 instrumental=gen_instrumental,
@@ -939,6 +938,10 @@ def create_app() -> FastAPI:
                         metadata[key] = lm_metadata.get(key)
 
             output_audio_codes = extra.get("audio_codes", "")
+            if not output_audio_codes and result.audios:
+                output_audio_codes = result.audios[0].get("params", {}).get("audio_codes", "")
+            if not output_audio_codes:
+                output_audio_codes = resolved_audio_codes or ""
 
             return {
                 "audio_path": audio_path,
@@ -1133,95 +1136,6 @@ def create_app() -> FastAPI:
             "service": "ACE-Step OpenRouter API",
             "version": "1.0",
         }
-
-    @app.post("/v1/sample")
-    async def sample_from_query(
-        request: SampleRequest,
-        _: None = Depends(verify_api_key),
-    ):
-        """Generate music parameters (caption, lyrics, metadata) from a natural language query via LLM."""
-        if not app.state._llm_initialized:
-            raise HTTPException(status_code=503, detail="LLM not initialized")
-
-        llm = app.state.llm_handler
-
-        def _blocking_sample():
-            sample_result, status_msg = llm.create_sample_from_query(
-                query=request.query,
-                instrumental=request.instrumental,
-                vocal_language=request.vocal_language,
-                temperature=request.temperature,
-                use_constrained_decoding=True,
-            )
-            if not sample_result:
-                raise RuntimeError(f"Sample generation failed: {status_msg}")
-            return sample_result, status_msg
-
-        try:
-            loop = asyncio.get_running_loop()
-            sample_result, status_msg = await loop.run_in_executor(
-                app.state.executor, _blocking_sample
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Sample generation failed: {str(e)}")
-
-        caption = sample_result.get("caption", "")
-        lyrics = sample_result.get("lyrics", "")
-
-        metadata = {
-            "bpm": sample_result.get("bpm"),
-            "duration": sample_result.get("duration"),
-            "vocal_language": sample_result.get("language") or request.vocal_language,
-            "key_scale": sample_result.get("keyscale", ""),
-            "time_signature": sample_result.get("timesignature", ""),
-        }
-
-        return {
-            "caption": caption,
-            "lyrics": lyrics,
-            "metadata": metadata,
-        }
-
-    @app.post("/v1/audio2code")
-    async def audio_to_code(
-        request: Audio2CodeRequest,
-        _: None = Depends(verify_api_key),
-    ):
-        """Convert source audio (base64) to audio code tokens."""
-        if not app.state._initialized:
-            raise HTTPException(status_code=503, detail="Model not initialized")
-
-        h: AceStepHandler = app.state.handler
-
-        def _blocking_convert():
-            b64_data = request.src_audio_b64
-            if "," in b64_data:
-                b64_data = b64_data.split(",", 1)[1]
-
-            audio_bytes = base64.b64decode(b64_data)
-            suffix = f".{request.src_audio_format}"
-            fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="audio2code_")
-            os.close(fd)
-            try:
-                with open(tmp_path, "wb") as f:
-                    f.write(audio_bytes)
-                codes_string = h.convert_src_audio_to_codes(tmp_path)
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-
-            if codes_string.startswith("❌"):
-                raise RuntimeError(codes_string)
-
-            return codes_string
-
-        try:
-            loop = asyncio.get_running_loop()
-            codes = await loop.run_in_executor(app.state.executor, _blocking_convert)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Audio2code failed: {str(e)}")
-
-        return {"audio_codes": codes}
 
     return app
 
