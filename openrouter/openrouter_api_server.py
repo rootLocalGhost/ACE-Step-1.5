@@ -3,9 +3,11 @@
 Provides OpenAI Chat Completions API format for text-to-music generation.
 
 Endpoints:
-- GET  /v1/models       List available models with pricing
-- POST /v1/chat/completions Generate music from text prompt
-- GET  /health              Health check
+- GET  /v1/models            List available models with pricing
+- POST /v1/chat/completions  Generate music from text prompt
+- POST /v1/sample            LLM generates caption/lyrics/metadata from query
+- POST /v1/audio2code        Convert source audio to audio code tokens
+- GET  /health               Health check
 
 Usage:
     python -m openrouter.openrouter_api_server --host 0.0.0.0 --port 8002
@@ -47,6 +49,7 @@ from acestep.inference import (
     generate_music,
     format_sample,
 )
+from acestep.constants import TASK_INSTRUCTIONS
 
 # =============================================================================
 # Constants
@@ -131,12 +134,20 @@ class ChatCompletionRequest(BaseModel):
     use_format: bool = False
     use_cot_caption: bool = True
     use_cot_language: bool = True
+    use_cot_metas: Optional[bool] = None
     # Task type
     task_type: str = "text2music"
     # Audio editing parameters
     repainting_start: float = 0.0
     repainting_end: Optional[float] = None
     audio_cover_strength: float = 1.0
+    # Extended fields for ComfyUI node compatibility
+    audio_codes: str = ""
+    cover_noise_strength: float = 0.0
+    inference_steps: int = 8
+    infer_method: str = "ode"
+    lm_cfg_scale: float = 2.0
+    top_k: int = 0
 
 
 class AudioUrlContent(BaseModel):
@@ -153,7 +164,8 @@ class AudioOutputItem(BaseModel):
 class ResponseMessage(BaseModel):
     role: str = "assistant"
     content: Optional[str] = None
-    audio: Optional[List[AudioOutputItem]] = None  # OpenRouter format: list of audio items
+    audio: Optional[List[AudioOutputItem]] = None
+    audio_codes: Optional[str] = None
 
 
 class Choice(BaseModel):
@@ -215,6 +227,20 @@ class ModelInfo(BaseModel):
 
 class ModelsResponse(BaseModel):
     data: List[ModelInfo]
+
+
+class SampleRequest(BaseModel):
+    """Request model for /v1/sample endpoint."""
+    query: str
+    instrumental: bool = False
+    vocal_language: str = "en"
+    temperature: float = 0.85
+
+
+class Audio2CodeRequest(BaseModel):
+    """Request model for /v1/audio2code endpoint."""
+    src_audio_b64: str
+    src_audio_format: str = "wav"
 
 
 # =============================================================================
@@ -668,6 +694,8 @@ def create_app() -> FastAPI:
         resolved_instrumental = audio_config.instrumental if audio_config.instrumental is not None else (not lyrics)
         resolved_duration = audio_config.duration
         resolved_bpm = audio_config.bpm
+        resolved_key_scale = audio_config.key_scale or ""
+        resolved_time_signature = audio_config.time_signature or ""
 
         # Route audio paths based on task_type.
         # cover / repaint / lego / extract / complete:
@@ -791,20 +819,32 @@ def create_app() -> FastAPI:
             lm_meta = lm_result.get("metadata", {})
             gen_bpm = lm_meta.get("bpm") or resolved_bpm
             gen_duration = lm_meta.get("duration") or (resolved_duration if resolved_duration else -1.0)
-            gen_keyscale = lm_meta.get("keyscale") or ""
-            gen_timesignature = lm_meta.get("timesignature") or ""
+            gen_keyscale = lm_meta.get("keyscale") or resolved_key_scale
+            gen_timesignature = lm_meta.get("timesignature") or resolved_time_signature
             gen_language = lm_meta.get("language") or resolved_vocal_language
 
-            # If sample/format already generated duration, skip Phase 1 CoT metas
             is_sample_mode = bool(sample_query and lm_result.get("lm_used"))
             format_has_duration = lm_result.get("format_has_duration", False)
 
-            # Default timesteps for turbo model (8 steps)
             default_timesteps = [0.97, 0.76, 0.615, 0.5, 0.395, 0.28, 0.18, 0.085, 0.0]
 
-            # Build generation parameters
+            task_instruction = TASK_INSTRUCTIONS.get(request.task_type, TASK_INSTRUCTIONS["text2music"])
+
+            no_lm_task = request.task_type in ("cover", "repaint")
+            resolved_thinking = False if no_lm_task else request.thinking
+            resolved_cot_caption = False if no_lm_task else request.use_cot_caption
+            resolved_cot_language = False if no_lm_task else request.use_cot_language
+            if request.use_cot_metas is not None:
+                resolved_cot_metas = False if no_lm_task else request.use_cot_metas
+            else:
+                resolved_cot_metas = False if no_lm_task else (not is_sample_mode and not format_has_duration)
+
             params = GenerationParams(
                 task_type=request.task_type,
+                instruction=task_instruction,
+                reference_audio=reference_audio_path,
+                src_audio=src_audio_path,
+                audio_codes=request.audio_codes,
                 caption=gen_prompt,
                 lyrics=gen_lyrics,
                 instrumental=gen_instrumental,
@@ -813,15 +853,23 @@ def create_app() -> FastAPI:
                 keyscale=gen_keyscale,
                 timesignature=gen_timesignature,
                 duration=gen_duration if gen_duration else -1.0,
-                inference_steps=8,
+                inference_steps=request.inference_steps,
+                infer_method=request.infer_method,
                 guidance_scale=request.guidance_scale if request.guidance_scale is not None else 7.0,
                 lm_temperature=request.temperature,
+                lm_cfg_scale=request.lm_cfg_scale,
                 lm_top_p=request.top_p,
-                thinking=request.thinking,
-                use_cot_metas=not is_sample_mode and not format_has_duration,
-                use_cot_caption=request.use_cot_caption,
-                use_cot_language=request.use_cot_language,
+                lm_top_k=request.top_k,
+                thinking=resolved_thinking,
+                use_cot_metas=resolved_cot_metas,
+                use_cot_caption=resolved_cot_caption,
+                use_cot_language=resolved_cot_language,
+                use_constrained_decoding=True,
                 timesteps=default_timesteps,
+                repainting_start=request.repainting_start,
+                repainting_end=request.repainting_end if request.repainting_end is not None else -1,
+                audio_cover_strength=request.audio_cover_strength,
+                cover_noise_strength=request.cover_noise_strength,
             )
 
             # Resolve seed(s): parse into Optional[List[int]] for GenerationConfig.seeds
@@ -882,18 +930,22 @@ def create_app() -> FastAPI:
                     "instrumental": gen_instrumental,
                 }
 
-            # Extract LM metadata from result if available
-            lm_metadata = result.extra_outputs.get("lm_metadata", {}) if hasattr(result, 'extra_outputs') else {}
+            # Extract LM metadata and audio codes from result if available
+            extra = result.extra_outputs if hasattr(result, 'extra_outputs') and result.extra_outputs else {}
+            lm_metadata = extra.get("lm_metadata", {})
             if lm_metadata:
                 for key in ["caption", "bpm", "duration", "keyscale", "timesignature", "language"]:
                     if lm_metadata.get(key):
                         metadata[key] = lm_metadata.get(key)
+
+            output_audio_codes = extra.get("audio_codes", "")
 
             return {
                 "audio_path": audio_path,
                 "lyrics": gen_lyrics,
                 "metadata": metadata,
                 "lm_used": lm_result.get("lm_used", False),
+                "audio_codes": output_audio_codes,
             }
 
         # Handle streaming mode
@@ -1059,6 +1111,7 @@ def create_app() -> FastAPI:
                         role="assistant",
                         content=text_content,
                         audio=audio_list,
+                        audio_codes=result.get("audio_codes") or None,
                     ),
                     finish_reason="stop",
                 )
@@ -1080,7 +1133,96 @@ def create_app() -> FastAPI:
             "service": "ACE-Step OpenRouter API",
             "version": "1.0",
         }
-    
+
+    @app.post("/v1/sample")
+    async def sample_from_query(
+        request: SampleRequest,
+        _: None = Depends(verify_api_key),
+    ):
+        """Generate music parameters (caption, lyrics, metadata) from a natural language query via LLM."""
+        if not app.state._llm_initialized:
+            raise HTTPException(status_code=503, detail="LLM not initialized")
+
+        llm = app.state.llm_handler
+
+        def _blocking_sample():
+            sample_result, status_msg = llm.create_sample_from_query(
+                query=request.query,
+                instrumental=request.instrumental,
+                vocal_language=request.vocal_language,
+                temperature=request.temperature,
+                use_constrained_decoding=True,
+            )
+            if not sample_result:
+                raise RuntimeError(f"Sample generation failed: {status_msg}")
+            return sample_result, status_msg
+
+        try:
+            loop = asyncio.get_running_loop()
+            sample_result, status_msg = await loop.run_in_executor(
+                app.state.executor, _blocking_sample
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Sample generation failed: {str(e)}")
+
+        caption = sample_result.get("caption", "")
+        lyrics = sample_result.get("lyrics", "")
+
+        metadata = {
+            "bpm": sample_result.get("bpm"),
+            "duration": sample_result.get("duration"),
+            "vocal_language": sample_result.get("language") or request.vocal_language,
+            "key_scale": sample_result.get("keyscale", ""),
+            "time_signature": sample_result.get("timesignature", ""),
+        }
+
+        return {
+            "caption": caption,
+            "lyrics": lyrics,
+            "metadata": metadata,
+        }
+
+    @app.post("/v1/audio2code")
+    async def audio_to_code(
+        request: Audio2CodeRequest,
+        _: None = Depends(verify_api_key),
+    ):
+        """Convert source audio (base64) to audio code tokens."""
+        if not app.state._initialized:
+            raise HTTPException(status_code=503, detail="Model not initialized")
+
+        h: AceStepHandler = app.state.handler
+
+        def _blocking_convert():
+            b64_data = request.src_audio_b64
+            if "," in b64_data:
+                b64_data = b64_data.split(",", 1)[1]
+
+            audio_bytes = base64.b64decode(b64_data)
+            suffix = f".{request.src_audio_format}"
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="audio2code_")
+            os.close(fd)
+            try:
+                with open(tmp_path, "wb") as f:
+                    f.write(audio_bytes)
+                codes_string = h.convert_src_audio_to_codes(tmp_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+            if codes_string.startswith("❌"):
+                raise RuntimeError(codes_string)
+
+            return codes_string
+
+        try:
+            loop = asyncio.get_running_loop()
+            codes = await loop.run_in_executor(app.state.executor, _blocking_convert)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Audio2code failed: {str(e)}")
+
+        return {"audio_codes": codes}
+
     return app
 
 
