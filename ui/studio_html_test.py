@@ -23,6 +23,13 @@ class StudioHtmlVolumeGuardTests(unittest.TestCase):
         self.assertIn("if (!isTrustedUserEvent(event)) {", self._html)
         self.assertIn("applyPreferredVolumeToAudio(audioEl);", self._html)
 
+    def test_volume_defaults_on_missing_storage(self):
+        """Missing localStorage value should seed and persist a sane default volume."""
+        self.assertIn("const DEFAULT_AUDIO_VOLUME = 0.5;", self._html)
+        self.assertIn("const raw = window.localStorage.getItem(AUDIO_VOLUME_STORAGE_KEY);", self._html)
+        self.assertIn("if (raw === null || raw === undefined || raw === '') return DEFAULT_AUDIO_VOLUME;", self._html)
+        self.assertIn("savePreferredAudioVolume(preferredAudioVolume);", self._html)
+
 
 if __name__ == "__main__":
     unittest.main()

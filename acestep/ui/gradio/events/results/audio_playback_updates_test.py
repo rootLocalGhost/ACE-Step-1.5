@@ -32,13 +32,14 @@ class AudioPlaybackUpdatesTests(unittest.TestCase):
 
     def test_build_audio_slot_update_sets_value_and_rewinds(self):
         """Success path: slot update should carry path and playback reset."""
+        sample_path = "sample.flac"
         result = build_audio_slot_update(
             _FakeGr,
-            "/tmp/sample.flac",
+            sample_path,
             label="Sample 1 (Ready)",
             interactive=False,
         )
-        self.assertEqual(result["value"], "/tmp/sample.flac")
+        self.assertEqual(result["value"], sample_path)
         self.assertEqual(result["playback_position"], 0)
         self.assertEqual(result["label"], "Sample 1 (Ready)")
         self.assertFalse(result["interactive"])
@@ -51,8 +52,9 @@ class AudioPlaybackUpdatesTests(unittest.TestCase):
 
     def test_build_audio_slot_update_without_optional_flags_preserves_defaults(self):
         """Non-target behavior: no label/interactivity overrides unless explicitly passed."""
-        result = build_audio_slot_update(_FakeGr, "/tmp/sample.flac")
-        self.assertEqual(result["value"], "/tmp/sample.flac")
+        sample_path = "sample.flac"
+        result = build_audio_slot_update(_FakeGr, sample_path)
+        self.assertEqual(result["value"], sample_path)
         self.assertEqual(result["playback_position"], 0)
         self.assertNotIn("label", result)
         self.assertNotIn("interactive", result)

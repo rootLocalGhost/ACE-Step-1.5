@@ -35,7 +35,7 @@ def clear_audio_outputs_for_new_generation():
     """
     try:
         import gradio as gr  # local import keeps headless tests dependency-free
-    except Exception:
+    except (ModuleNotFoundError, ImportError):
         return (None,) * 9
     return tuple(gr.update(playback_position=0) for _ in range(8)) + (None,)
 

@@ -439,6 +439,7 @@
     let wsRegions = null;
     let activeRegion = null;
     let uploadedFile = null;
+    const DEFAULT_AUDIO_VOLUME = 0.5;
     const AUDIO_VOLUME_STORAGE_KEY = "acestep.studio.audio.volume";
     const AUDIO_EPSILON = 0.001;
     const managedAudioElements = new WeakSet();
@@ -477,6 +478,7 @@
     };
 
     function clampVolume(value) {
+        if (value === null || value === undefined || value === '') return null;
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return null;
         if (parsed < 0) return 0;
@@ -490,9 +492,12 @@
 
     function loadPreferredAudioVolume() {
         try {
-            return clampVolume(window.localStorage.getItem(AUDIO_VOLUME_STORAGE_KEY));
+            const raw = window.localStorage.getItem(AUDIO_VOLUME_STORAGE_KEY);
+            if (raw === null || raw === undefined || raw === '') return DEFAULT_AUDIO_VOLUME;
+            const parsed = clampVolume(raw);
+            return parsed === null ? DEFAULT_AUDIO_VOLUME : parsed;
         } catch (_error) {
-            return null;
+            return DEFAULT_AUDIO_VOLUME;
         }
     }
 
@@ -567,6 +572,7 @@
     }
 
     preferredAudioVolume = loadPreferredAudioVolume();
+    savePreferredAudioVolume(preferredAudioVolume);
     scanAndRegisterAudioPlayers();
 
     // --- UI Listeners ---
