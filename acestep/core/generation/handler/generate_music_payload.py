@@ -1,6 +1,5 @@
 """Success payload builders for ``generate_music`` orchestration."""
 
-import gc
 from typing import Any, Dict
 
 from loguru import logger
@@ -80,21 +79,6 @@ class GenerateMusicPayloadMixin:
             "context_latents": context_latents.detach().cpu() if context_latents is not None else None,
             "lyric_token_idss": lyric_token_idss.detach().cpu() if lyric_token_idss is not None else None,
         }
-
-        # Remove GPU tensor entries from the outputs dict so accelerator memory
-        # can be reclaimed without waiting for a full GC cycle.
-        _gpu_keys = (
-            "src_latents", "target_latents_input", "chunk_masks", "latent_masks",
-            "encoder_hidden_states", "encoder_attention_mask", "context_latents",
-            "lyric_token_idss", "target_latents",
-        )
-        for _k in _gpu_keys:
-            outputs.pop(_k, None)
-        # Drop local references so Python's reference counter can free the
-        # accelerator buffers immediately rather than waiting for the next GC.
-        del (src_latents, target_latents_input, chunk_masks, latent_masks,
-             encoder_hidden_states, encoder_attention_mask, context_latents, lyric_token_idss)
-        gc.collect()
 
         audios = []
         for audio_tensor in audio_tensors:

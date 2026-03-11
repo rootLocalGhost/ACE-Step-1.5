@@ -261,8 +261,17 @@ class GenerateMusicMixin:
                 actual_batch_size=actual_batch_size,
                 progress=progress,
             )
-            # Release remaining intermediate state and flush accelerator caches
-            # so memory from this generation is reclaimed before the next one.
+            # Clear GPU tensor references from the mutable outputs dict so
+            # accelerator memory is reclaimable before the next generation.
+            _gpu_keys = (
+                "src_latents", "target_latents_input", "chunk_masks",
+                "latent_masks", "encoder_hidden_states",
+                "encoder_attention_mask", "context_latents",
+                "lyric_token_idss",
+            )
+            for _k in _gpu_keys:
+                outputs.pop(_k, None)
+            del outputs, pred_wavs, pred_latents_cpu
             gc.collect()
             self._empty_cache()
             return result
