@@ -46,6 +46,8 @@ def generate_with_batch_management(
     fade_out_duration,
     latent_shift,
     latent_rescale,
+    repaint_mode,
+    repaint_strength,
     autogen_checkbox,
     current_batch_index,
     total_batches,
@@ -74,6 +76,7 @@ def generate_with_batch_management(
         lm_batch_chunk_size,
         enable_normalization, normalization_db, fade_in_duration, fade_out_duration,
         latent_shift, latent_rescale,
+        repaint_mode, repaint_strength,
         progress,
     )
 
