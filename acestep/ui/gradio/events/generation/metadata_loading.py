@@ -121,14 +121,17 @@ def load_metadata(file_obj, llm_handler=None):
 
         gr.Info(t("messages.params_loaded", filename=os.path.basename(filepath)))
 
+        _MP3_BITRATE_CHOICES = [("128 kbps", "128k"), ("192 kbps", "192k"), ("256 kbps", "256k"), ("320 kbps", "320k")]
+        _MP3_SAMPLE_RATE_CHOICES = [("48 kHz", 48000), ("44.1 kHz", 44100)]
+
         return (
             task_type, captions, lyrics, vocal_language, bpm, key_scale, time_signature,
             audio_duration, batch_size, inference_steps, guidance_scale, seed, random_seed,
             use_adg, cfg_interval_start, cfg_interval_end, shift, infer_method,
             custom_timesteps,
             audio_format, gr.update(visible=is_mp3),
-            gr.update(value=mp3_bitrate, visible=is_mp3),
-            gr.update(value=mp3_sample_rate, visible=is_mp3),
+            gr.update(choices=_MP3_BITRATE_CHOICES, value=mp3_bitrate, visible=is_mp3),
+            gr.update(choices=_MP3_SAMPLE_RATE_CHOICES, value=mp3_sample_rate, visible=is_mp3),
             lm_temperature, lm_cfg_scale, lm_top_k, lm_top_p, lm_negative_prompt,
             use_cot_metas, use_cot_caption, use_cot_language, audio_cover_strength,
             cover_noise_strength, think, audio_codes, repainting_start, repainting_end,

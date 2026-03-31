@@ -7,13 +7,18 @@ import gradio as gr
 from acestep.ui.gradio.i18n import t
 
 
+_MP3_BITRATE_CHOICES = [("128 kbps", "128k"), ("192 kbps", "192k"), ("256 kbps", "256k"), ("320 kbps", "320k")]
+_MP3_SAMPLE_RATE_CHOICES = [("48 kHz", 48000), ("44.1 kHz", 44100)]
+
+
 def _update_mp3_control_visibility(audio_format: str, service_mode: bool = False):
     """Return visibility and interactivity updates for MP3-only controls."""
     visible = audio_format == "mp3"
+    interactive = visible and not service_mode
     return (
         gr.update(visible=visible),
-        gr.update(visible=visible, interactive=visible and not service_mode),
-        gr.update(visible=visible, interactive=visible and not service_mode),
+        gr.update(choices=_MP3_BITRATE_CHOICES, visible=visible, interactive=interactive),
+        gr.update(choices=_MP3_SAMPLE_RATE_CHOICES, visible=visible, interactive=interactive),
     )
 
 
