@@ -80,6 +80,11 @@ class ServiceGenerateExecuteMixin:
         sampler_mode: str = "euler",
         velocity_norm_threshold: float = 0.0,
         velocity_ema_factor: float = 0.0,
+        dcw_enabled: bool = False,
+        dcw_mode: str = "low",
+        dcw_scaler: float = 0.1,
+        dcw_high_scaler: float = 0.0,
+        dcw_wavelet: str = "haar",
     ) -> Dict[str, Any]:
         """Build kwargs passed to model generation backends."""
         repaint_mask = payload.get("repaint_mask")
@@ -116,6 +121,11 @@ class ServiceGenerateExecuteMixin:
             "sampler_mode": sampler_mode,
             "velocity_norm_threshold": velocity_norm_threshold,
             "velocity_ema_factor": velocity_ema_factor,
+            "dcw_enabled": dcw_enabled,
+            "dcw_mode": dcw_mode,
+            "dcw_scaler": dcw_scaler,
+            "dcw_high_scaler": dcw_high_scaler,
+            "dcw_wavelet": dcw_wavelet,
         }
         if timesteps is not None:
             kwargs["timesteps"] = torch.tensor(timesteps, dtype=torch.float32, device=self.device)

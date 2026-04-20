@@ -138,6 +138,14 @@ class GenerationParams:
     sampler_mode: str = "euler"  # "euler" (first-order) or "heun" (second-order predictor-corrector)
     velocity_norm_threshold: float = 0.0  # Clamp velocity prediction norms (0 = disabled, try 2.0)
     velocity_ema_factor: float = 0.0  # Velocity EMA smoothing (0 = disabled, try 0.1)
+    # DCW — Differential Correction in Wavelet domain (CVPR 2026, arXiv:2604.16044).
+    # Off by default; enable to mitigate SNR-t bias via per-band wavelet-domain
+    # correction at each sampler step.  Requires `pytorch_wavelets` + `PyWavelets`.
+    dcw_enabled: bool = False
+    dcw_mode: str = "low"           # "low" | "high" | "double" | "pix"
+    dcw_scaler: float = 0.1         # low-band scaler (or single scaler for "high"/"pix")
+    dcw_high_scaler: float = 0.0    # high-band scaler (used only in "double" mode)
+    dcw_wavelet: str = "haar"       # PyWavelets basis, e.g. "haar", "db4", "sym8"
     # Custom timesteps (parsed from string like "0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0")
     # If provided, overrides inference_steps and shift
     timesteps: Optional[List[float]] = None
@@ -649,6 +657,11 @@ def generate_music(
             "sampler_mode": params.sampler_mode,
             "velocity_norm_threshold": params.velocity_norm_threshold,
             "velocity_ema_factor": params.velocity_ema_factor,
+            "dcw_enabled": params.dcw_enabled,
+            "dcw_mode": params.dcw_mode,
+            "dcw_scaler": params.dcw_scaler,
+            "dcw_high_scaler": params.dcw_high_scaler,
+            "dcw_wavelet": params.dcw_wavelet,
             "timesteps": params.timesteps,
             "latent_shift": params.latent_shift,
             "latent_rescale": params.latent_rescale,
