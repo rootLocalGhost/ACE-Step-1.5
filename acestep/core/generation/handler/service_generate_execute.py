@@ -169,6 +169,13 @@ class ServiceGenerateExecuteMixin:
                 )
 
                 if self.use_mlx_dit and self.mlx_decoder is not None:
+                    if generate_kwargs.get("dcw_enabled") and generate_kwargs.get("dcw_wavelet", "haar") != "haar":
+                        logger.info(
+                            "[service_generate] DCW enabled on MLX path with "
+                            "wavelet='{}'; only 'haar' is implemented natively "
+                            "on MLX, the helper will warn and fall back to Haar.",
+                            generate_kwargs.get("dcw_wavelet"),
+                        )
                     try:
                         enc_hs_nc, enc_am_nc, ctx_nc = None, None, None
                         if audio_cover_strength < 1.0 and payload["non_cover_text_hidden_states"] is not None:

@@ -236,6 +236,16 @@ class GenerateMusicMixin:
             guidance_scale: CFG guidance value.
             seed: Optional explicit seed from caller/UI.
             infer_method: Diffusion method name.
+            dcw_enabled: Enable Differential Correction in Wavelet domain
+                (CVPR 2026, arXiv:2604.16044) at each sampler step.  Off by default.
+            dcw_mode: DCW mode — ``"low"`` / ``"high"`` / ``"double"`` / ``"pix"``.
+            dcw_scaler: Low-band (or single-band) correction strength; modulated
+                by ``t_curr`` inside the sampler, so the effective strength decays
+                from ``dcw_scaler`` at ``t=1`` to 0 at ``t=0``.
+            dcw_high_scaler: High-band strength — only used in ``"double"`` mode.
+            dcw_wavelet: PyWavelets basis, e.g. ``"haar"`` / ``"db4"`` / ``"sym8"``.
+                On the MLX path only ``"haar"`` is implemented natively; other
+                bases warn once and fall back to Haar.
             timesteps: Optional custom timestep schedule.
             use_tiled_decode: Whether tiled VAE decode is used.
             latent_shift: Additive latent post-processing value.

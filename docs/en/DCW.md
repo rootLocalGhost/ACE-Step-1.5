@@ -88,7 +88,10 @@ are forwarded through the generation handler chain into the base model's
 ## Usage example (Python API)
 
 ```python
-from acestep.inference import GenerationParams, generate_music
+from acestep.inference import GenerationConfig, GenerationParams, generate_music
+
+# `dit_handler` and `llm_handler` come from the standard ACE-Step setup;
+# see docs/en/INFERENCE.md for how they're constructed.
 
 params = GenerationParams(
     caption="mellow lo-fi hiphop with jazzy piano",
@@ -101,9 +104,20 @@ params = GenerationParams(
     dcw_scaler=0.1,
     dcw_wavelet="haar",
 )
-
-result = generate_music(params)
+config = GenerationConfig(batch_size=1)
+result = generate_music(
+    dit_handler=dit_handler,
+    llm_handler=llm_handler,
+    params=params,
+    config=config,
+)
 ```
+
+### Usage example (Gradio UI)
+
+Open the standard Gradio UI, expand **Advanced DiT** → **🧪 DCW – Differential
+Correction in Wavelet domain (experimental)**, tick **Enable DCW**, and tune
+the four sliders/dropdowns. Off by default; toggle on for an A/B comparison.
 
 ## Recommended starting values
 
