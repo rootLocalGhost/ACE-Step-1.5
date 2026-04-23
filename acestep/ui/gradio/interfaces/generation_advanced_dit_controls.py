@@ -74,6 +74,47 @@ def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
                 info=t("generation.velocity_ema_factor_info"),
                 elem_classes=["has-info-container"],
             )
+        with gr.Accordion(t("generation.dcw_section"), open=False, elem_classes=["has-info-container"]):
+            with gr.Row():
+                dcw_enabled = gr.Checkbox(
+                    label=t("generation.dcw_enabled_label"),
+                    value=True,
+                    info=t("generation.dcw_enabled_info"),
+                    elem_classes=["has-info-container"],
+                )
+                dcw_mode = gr.Dropdown(
+                    choices=["low", "high", "double", "pix"],
+                    value="double",
+                    label=t("generation.dcw_mode_label"),
+                    info=t("generation.dcw_mode_info"),
+                    elem_classes=["has-info-container"],
+                )
+                dcw_wavelet = gr.Dropdown(
+                    choices=["haar", "db2", "db4", "sym4", "sym8", "coif2"],
+                    value="haar",
+                    label=t("generation.dcw_wavelet_label"),
+                    info=t("generation.dcw_wavelet_info"),
+                    elem_classes=["has-info-container"],
+                )
+            with gr.Row():
+                dcw_scaler = gr.Slider(
+                    minimum=0.0,
+                    maximum=0.1,
+                    value=0.05,
+                    step=0.005,
+                    label=t("generation.dcw_scaler_label"),
+                    info=t("generation.dcw_scaler_info"),
+                    elem_classes=["has-info-container"],
+                )
+                dcw_high_scaler = gr.Slider(
+                    minimum=0.0,
+                    maximum=0.1,
+                    value=0.02,
+                    step=0.005,
+                    label=t("generation.dcw_high_scaler_label"),
+                    info=t("generation.dcw_high_scaler_info"),
+                    elem_classes=["has-info-container"],
+                )
         with gr.Row():
             use_adg = gr.Checkbox(
                 label=t("generation.use_adg_label"),
@@ -154,6 +195,11 @@ def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
         "sampler_mode": sampler_mode,
         "velocity_norm_threshold": velocity_norm_threshold,
         "velocity_ema_factor": velocity_ema_factor,
+        "dcw_enabled": dcw_enabled,
+        "dcw_mode": dcw_mode,
+        "dcw_scaler": dcw_scaler,
+        "dcw_high_scaler": dcw_high_scaler,
+        "dcw_wavelet": dcw_wavelet,
         "use_adg": use_adg,
         "shift": shift,
         "custom_timesteps": custom_timesteps,
