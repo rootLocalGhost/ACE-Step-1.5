@@ -56,12 +56,22 @@ def register_generation_mode_handlers(
         generation_section["generation_mode"],
         generation_section["previous_generation_mode"],
     ]
+    dcw_default_outputs = [
+        generation_section["dcw_mode"],
+        generation_section["dcw_scaler"],
+        generation_section["dcw_high_scaler"],
+    ]
 
     # ========== Generation Mode Change ==========
-    generation_section["generation_mode"].change(
+    mode_change_event = generation_section["generation_mode"].change(
         fn=_handle_mode_change,
         inputs=mode_change_inputs,
         outputs=mode_ui_outputs,
+    )
+    mode_change_event.then(
+        fn=gen_h.update_dcw_defaults_for_think,
+        inputs=[generation_section["think_checkbox"]],
+        outputs=dcw_default_outputs,
     )
 
     # ========== Initial Mode State on Page Load ==========
@@ -73,10 +83,21 @@ def register_generation_mode_handlers(
     # potentially other components) to be missing on page load.
     # This .load() event fires once on page load to initialize all
     # mode-dependent UI state using the same handler.
-    context.demo.load(
+    load_event = context.demo.load(
         fn=_handle_mode_change,
         inputs=mode_change_inputs,
         outputs=mode_ui_outputs,
+    )
+    load_event.then(
+        fn=gen_h.update_dcw_defaults_for_think,
+        inputs=[generation_section["think_checkbox"]],
+        outputs=dcw_default_outputs,
+    )
+
+    generation_section["think_checkbox"].change(
+        fn=gen_h.update_dcw_defaults_for_think,
+        inputs=[generation_section["think_checkbox"]],
+        outputs=dcw_default_outputs,
     )
 
     # ========== Extract Mode: Auto-fill caption from track_name ==========

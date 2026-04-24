@@ -128,10 +128,19 @@ class BatchManagementHelperTests(unittest.TestCase):
         self.assertEqual(params["fade_out_duration"], 0.0)
         self.assertEqual(params["dcw_enabled"], True)
         self.assertEqual(params["dcw_mode"], "double")
-        self.assertEqual(params["dcw_scaler"], 0.05)
-        self.assertEqual(params["dcw_high_scaler"], 0.02)
+        self.assertEqual(params["dcw_scaler"], 0.02)
+        self.assertEqual(params["dcw_high_scaler"], 0.06)
         self.assertEqual(params["dcw_wavelet"], "haar")
         self.assertFalse(params["no_fsq"])
+
+    def test_apply_param_defaults_uses_non_think_dcw_defaults_when_think_disabled(self):
+        """Defaults helper should use pure-DiT DCW defaults when Think is off."""
+        module, _state = load_batch_management_module(is_windows=False)
+        params = {"think_checkbox": False}
+        module._apply_param_defaults(params)
+        self.assertEqual(params["dcw_mode"], "double")
+        self.assertEqual(params["dcw_scaler"], 0.05)
+        self.assertEqual(params["dcw_high_scaler"], 0.02)
 
     def test_extract_scores_handles_wrapped_values_and_missing_indices(self):
         """Score extraction should normalize mixed score payload shapes."""

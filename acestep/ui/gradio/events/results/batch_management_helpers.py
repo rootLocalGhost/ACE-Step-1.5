@@ -6,6 +6,8 @@ background generation paths.
 
 from loguru import logger
 
+from acestep.ui.gradio.events.dcw_defaults import get_dcw_defaults_for_think
+
 
 def _extract_ui_core_outputs(result_tuple):
     """Return the fixed 46 core UI outputs from a generation result tuple.
@@ -105,6 +107,7 @@ def _log_background_params(params, next_batch_idx):
 
 def _apply_param_defaults(params):
     """Fill missing generation keys in ``params`` with safe defaults."""
+    dcw_defaults = get_dcw_defaults_for_think(bool(params.get("think_checkbox", True)))
     defaults = {
         "captions": "", "lyrics": "", "bpm": None, "key_scale": "",
         "time_signature": "", "vocal_language": "unknown",
@@ -121,8 +124,11 @@ def _apply_param_defaults(params):
         "shift": 1.0, "infer_method": "ode",
         "sampler_mode": "euler", "velocity_norm_threshold": 0.0,
         "velocity_ema_factor": 0.0,
-        "dcw_enabled": True, "dcw_mode": "double", "dcw_scaler": 0.05,
-        "dcw_high_scaler": 0.02, "dcw_wavelet": "haar",
+        "dcw_enabled": True,
+        "dcw_mode": dcw_defaults["mode"],
+        "dcw_scaler": dcw_defaults["scaler"],
+        "dcw_high_scaler": dcw_defaults["high_scaler"],
+        "dcw_wavelet": "haar",
         "custom_timesteps": "",
         "audio_format": "flac",
         "mp3_bitrate": "128k",

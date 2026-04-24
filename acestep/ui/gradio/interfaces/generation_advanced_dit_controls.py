@@ -5,19 +5,22 @@ from typing import Any
 import gradio as gr
 
 from acestep.gpu_config import get_global_gpu_config, is_mps_platform
+from acestep.ui.gradio.events.dcw_defaults import get_dcw_defaults_for_think
 from acestep.ui.gradio.help_content import create_help_button
 from acestep.ui.gradio.i18n import t
 
 
-def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
+def build_dit_controls(ui_config: dict[str, Any], think_enabled: bool = False) -> dict[str, Any]:
     """Create DiT diffusion controls for advanced settings.
 
     Args:
         ui_config: Visibility/range/value configuration returned by generation handler UI config logic.
+        think_enabled: Whether initial Think-mode DCW defaults should be used.
 
     Returns:
         A component map containing DiT sampling, CFG interval, ADG, shift, and seed controls.
     """
+    dcw_defaults = get_dcw_defaults_for_think(think_enabled)
 
     with gr.Accordion(t("generation.advanced_dit_section"), open=True, elem_classes=["has-info-container"]):
         create_help_button("generation_advanced")
@@ -84,7 +87,7 @@ def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
                 )
                 dcw_mode = gr.Dropdown(
                     choices=["low", "high", "double", "pix"],
-                    value="double",
+                    value=dcw_defaults["mode"],
                     label=t("generation.dcw_mode_label"),
                     info=t("generation.dcw_mode_info"),
                     elem_classes=["has-info-container"],
@@ -100,7 +103,7 @@ def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
                 dcw_scaler = gr.Slider(
                     minimum=0.0,
                     maximum=0.1,
-                    value=0.05,
+                    value=dcw_defaults["scaler"],
                     step=0.005,
                     label=t("generation.dcw_scaler_label"),
                     info=t("generation.dcw_scaler_info"),
@@ -109,7 +112,7 @@ def build_dit_controls(ui_config: dict[str, Any]) -> dict[str, Any]:
                 dcw_high_scaler = gr.Slider(
                     minimum=0.0,
                     maximum=0.1,
-                    value=0.02,
+                    value=dcw_defaults["high_scaler"],
                     step=0.005,
                     label=t("generation.dcw_high_scaler_label"),
                     info=t("generation.dcw_high_scaler_info"),
